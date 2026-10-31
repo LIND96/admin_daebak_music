@@ -1,0 +1,56 @@
+# ===== Secrets & local env (JANGAN PERNAH di-commit) =====
+# backend/.env berisi DB_PASSWORD & JWT_SECRET asli
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# ===== Go backend =====
+# hasil `go build`
+/server
+/migrate
+backend/server
+backend/migrate
+*.exe
+*.test
+*.out
+/coverage
+coverage.html
+# air (live reload) & tooling
+tmp/
+vendor/
+
+# ===== Next.js frontend =====
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+
+# ===== Logs & debug =====
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ===== OS & editor =====
+.DS_Store
+Thumbs.db
+*.pem
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# ===== Docker =====
+# data postgres hanya volume lokal, bukan file repo — tidak ada yang perlu di-ignore
+# di sini selama tidak ada bind-mount file. Baris di bawah jaga-jaga:
+pgdata/
