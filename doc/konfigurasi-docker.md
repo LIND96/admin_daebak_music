@@ -17,8 +17,8 @@ docker compose up --build
 Service yang dijalankan:
 
 - `db`: PostgreSQL 16 (port 5432)
-- `backend`: API Go (port 8080), otomatis menjalankan migrasi saat startup
-- `frontend`: Next.js (port 3000)
+- `backend`: API Go (port 8080); migrasi dijalankan manual via `docker compose exec backend /migrate up`
+- `frontend`: Next.js (port 3000, standalone output)
 
 Akses aplikasi di `http://localhost:3000`.
 
@@ -50,6 +50,7 @@ docker compose down -v
 | `JWT_SECRET` | change-me-in-production | Secret JWT |
 | `JWT_EXPIRY` | 24h | Masa berlaku token |
 | `FRONTEND_URL` | http://localhost:3000 | Origin frontend (CORS) |
+| `COOKIE_SECURE` | false | `true` di produksi (wajib HTTPS) |
 
 ### Frontend
 
@@ -59,6 +60,6 @@ docker compose down -v
 
 ## Catatan
 
-- Backend container menjalankan `/migrate up` sebelum `/server`, sehingga skema database otomatis diterapkan.
+- `docker-compose.yml` meng-override command backend menjadi hanya `/server`, jadi migrasi TIDAK otomatis: jalankan `docker compose exec backend /migrate up` setelah service menyala. (Image `backend/Dockerfile` sendiri defaultnya `/migrate up && /server`.)
 - Pastikan port 3000, 8080, dan 5432 tidak digunakan proses lain.
 - Untuk produksi, ganti `JWT_SECRET` dengan nilai yang kuat dan aman.

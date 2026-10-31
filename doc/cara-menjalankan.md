@@ -7,7 +7,7 @@ Proyek ini terdiri dari dua bagian:
 
 ## Prasyarat
 
-- Go 1.22+
+- Go 1.26+
 - Node.js 20+
 - PostgreSQL 16+
 - npm
@@ -56,12 +56,12 @@ Frontend akan berjalan di `http://localhost:3000`.
 
 | Method | Path | Keterangan |
 |--------|------|------------|
-| POST | `/api/auth/register` | Registrasi user |
-| POST | `/api/auth/login` | Login, mengembalikan JWT |
-| POST | `/api/auth/logout` | Logout (stateless) |
+| POST | `/api/auth/register` | Registrasi user, set cookie JWT |
+| POST | `/api/auth/login` | Login, set cookie JWT |
+| POST | `/api/auth/logout` | Logout, hapus cookie |
 | GET | `/api/auth/me` | Profil user saat ini |
 | GET | `/api/users` | Daftar semua user |
 | GET | `/api/users/:id` | Detail user |
 | PATCH | `/api/users/me` | Update profil sendiri |
 
-Autentikasi menggunakan header `Authorization: Bearer <token>`.
+Autentikasi memakai cookie httpOnly `token` (dikirim otomatis via `credentials: "include"`).
