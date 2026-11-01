@@ -46,9 +46,15 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+!.vscode/mcp.json
 *.swp
 *.swo
 *~
+
+# ===== Graphify =====
+# hasil `graphify .` (graph.json, graph.html, report) — build lokal per dev.
+# Hapus baris ini jika tim memilih commit graph (lihat doc/graphify-mcp-flow.md).
+graphify-out/
 
 # ===== Docker =====
 # data postgres hanya volume lokal, bukan file repo — tidak ada yang perlu di-ignore

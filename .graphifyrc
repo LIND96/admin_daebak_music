@@ -1,0 +1,3 @@
+# Project config untuk Graphify. Satu key=value per baris.
+# Dibaca oleh extract, update, hooks, MCP server, dan skill /graphify.
+viz_node_limit=5000
