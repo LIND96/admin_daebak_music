@@ -29,10 +29,10 @@ export default function LandingShowcase() {
             ))}
           </ul>
           <Link
-            href="/signup"
+            href="/signin"
             className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-8 py-4 text-lg font-semibold text-brand-900 transition-colors hover:bg-brand-50"
           >
-            Try It Free
+            Sign In
             <ArrowRightIcon className="size-5 rtl:rotate-180" />
           </Link>
         </div>

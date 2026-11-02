@@ -16,10 +16,10 @@ export default function LandingFooter() {
             Music. Set up in minutes, free forever to start.
           </p>
           <Link
-            href="/signup"
+            href="/signin"
             className="relative mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-8 py-4 text-lg font-semibold text-brand-900 transition-colors hover:bg-brand-50"
           >
-            Get Started Free
+            Sign In
             <ArrowRightIcon className="size-5 rtl:rotate-180" />
           </Link>
         </div>

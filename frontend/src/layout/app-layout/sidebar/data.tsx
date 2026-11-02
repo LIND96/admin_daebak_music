@@ -78,7 +78,6 @@ export const othersItems: NavItem[] = [
     key: "authentication",
     subItems: [
       { key: "signIn", path: "/signin", pro: false },
-      { key: "signUp", path: "/signup", pro: false },
     ],
   },
 ];
