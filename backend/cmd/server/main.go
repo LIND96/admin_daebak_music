@@ -22,6 +22,7 @@ func main() {
 
 	authH := &handlers.AuthHandler{DB: db, Cfg: cfg}
 	usersH := &handlers.UsersHandler{DB: db}
+	trackH := &handlers.TrackingHandler{DB: db}
 
 	r := gin.Default()
 
@@ -57,6 +58,13 @@ func main() {
 			users.GET("/:id", middleware.RequireRole("admin"), usersH.GetByID)
 			users.POST("", middleware.RequireRole("admin"), usersH.Create)
 			users.PATCH("/me", usersH.UpdateProfile)
+		}
+
+		tracking := api.Group("/tracking")
+		{
+			// Anonymous mobile hit, every call inserts a row.
+			tracking.POST("/daily-use", trackH.TrackDailyUse)
+			tracking.GET("/stats/daily", middleware.Auth(cfg), middleware.RequireRole("admin"), trackH.DailyStats)
 		}
 	}
 

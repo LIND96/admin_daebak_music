@@ -63,4 +63,41 @@ export const api = {
     request<{ user: User }>("/api/users", { method: "POST", body: JSON.stringify(body) }),
   updateProfile: (body: { full_name?: string; avatar_url?: string; username?: string; gender?: string; birthdate?: string; country?: string }) =>
     request<{ user: User }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }),
+  trackDailyUse: (body: { device_id: string; apps_name: string; android_version?: string; device_brand?: string; device_model?: string; country?: string; country_code?: string; email?: string }) =>
+    request<{ status: string }>("/api/tracking/daily-use", { method: "POST", body: JSON.stringify(body) }),
+  getDailyStats: (params: { date: string; apps_name?: string }) => {
+    const q = new URLSearchParams({ date: params.date });
+    if (params.apps_name) q.set("apps_name", params.apps_name);
+    return request<DailyStatsResponse>(`/api/tracking/stats/daily?${q.toString()}`);
+  },
+};
+
+export type HourlyBucket = {
+  hour: number;
+  hits: number;
+  unique_devices: number;
+};
+
+export type CountryStat = {
+  country: string;
+  country_code: string;
+  hits: number;
+  unique_devices: number;
+};
+
+export type AppStat = {
+  apps_name: string;
+  hits: number;
+  unique_devices: number;
+};
+
+export type DailyStatsResponse = {
+  date: string;
+  timezone: string;
+  apps_name: string;
+  total_hits: number;
+  dau: number;
+  hourly: HourlyBucket[];
+  by_country: CountryStat[];
+  by_app: AppStat[];
 };

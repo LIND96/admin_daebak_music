@@ -27,7 +27,7 @@ services:
       DB_SSLMODE: disable
       JWT_SECRET: change-me-in-production
       JWT_EXPIRY: 24h
-      FRONTEND_URL: http://localhost:3000
+      FRONTEND_URL: http://localhost
       COOKIE_SECURE: "false"
     ports:
       - "8080:8080"
@@ -40,11 +40,29 @@ services:
   frontend:
     build: ./frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8080
+      # Same-origin via Caddy: browser memanggil http://localhost/api/* -> backend.
+      NEXT_PUBLIC_API_URL: http://localhost
     ports:
       - "3000:3000"
     depends_on:
       - backend
 
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      - backend
+      - frontend
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

@@ -437,6 +437,82 @@
           }
         }
       ]
+    },
+    {
+      "name": "Tracking",
+      "item": [
+        {
+          "name": "POST Track Daily Use (publik, anonim)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tracking",
+                "daily-use"
+              ],
+              "raw": "{{baseUrl}}/api/tracking/daily-use"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"device_id\": \"abc-53342\",\n  \"apps_name\": \"BTS ARMY\",\n  \"android_version\": \"14\",\n  \"country\": \"Ukraine\",\n  \"country_code\": \"UA\",\n  \"device_brand\": \"Samsung\",\n  \"device_model\": \"Galaxy S24\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET Daily Stats (admin only)",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tracking",
+                "stats",
+                "daily"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2026-11-03"
+                },
+                {
+                  "key": "apps_name",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/tracking/stats/daily?date=2026-11-03"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   ],
   "variable": [
