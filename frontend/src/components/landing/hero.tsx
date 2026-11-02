@@ -37,10 +37,10 @@ export default function LandingHero() {
 
       <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row lg:justify-start">
         <Link
-          href="/signup"
+          href="/dashboard"
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-brand-500/25 transition-colors hover:bg-brand-600 sm:w-auto"
         >
-          Start for Free
+          Open Dashboard
           <ArrowRightIcon className="size-5 rtl:rotate-180" />
         </Link>
         <a

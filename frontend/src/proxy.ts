@@ -7,10 +7,11 @@ import { routing } from "./i18n/routing";
 const intlMiddleware = createMiddleware(routing);
 
 // Halaman auth: user yang sudah login (punya cookie) dialihkan ke dashboard.
-const guestOnlyRoutes = ["/signin", "/signup"];
+// /signup dimatikan (register publik off) — selalu lempar ke /signin.
+const guestOnlyRoutes = ["/signin"];
 
 // Halaman yang boleh dibuka tanpa login.
-const publicRoutes = ["/", "/signin", "/signup", "/error-404"];
+const publicRoutes = ["/", "/signin", "/error-404"];
 
 function matches(pathname: string, routes: string[]) {
   return routes.some(
@@ -26,6 +27,13 @@ export function proxy(request: NextRequest) {
   // Cek optimis: hanya keberadaan cookie. Verifikasi JWT tetap di backend Go.
   const token = request.cookies.get("token")?.value;
   const { pathname } = request.nextUrl;
+
+  // /signup dimatikan: register publik off, admin dibuat via bootstrap / API.
+  if (pathname === "/signup" || pathname.startsWith("/signup/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/signin";
+    return NextResponse.redirect(url);
+  }
 
   if (!token && !matches(pathname, publicRoutes)) {
     const url = request.nextUrl.clone();

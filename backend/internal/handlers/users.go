@@ -3,8 +3,10 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"admin_daebak_music/backend/internal/models"
+	"admin_daebak_music/backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -12,6 +14,43 @@ import (
 
 type UsersHandler struct {
 	DB *gorm.DB
+}
+
+type createUserRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=6"`
+	FullName string `json:"full_name"`
+	Role     string `json:"role" binding:"required,oneof=admin customer"`
+}
+
+// Create lets an admin provision email/password accounts (register is disabled).
+func (h *UsersHandler) Create(c *gin.Context) {
+	var req createUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hashed, err := utils.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	user := models.User{
+		Email:        req.Email,
+		Username:     req.Username,
+		Password:     hashed,
+		FullName:     req.FullName,
+		Role:         req.Role,
+		AuthProvider: "email",
+	}
+	if err := h.DB.Create(&user).Error; err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "email or username already exists"})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"user": user.ToResponse()})
 }
 
 func (h *UsersHandler) List(c *gin.Context) {
@@ -48,6 +87,9 @@ func (h *UsersHandler) UpdateProfile(c *gin.Context) {
 		FullName  string `json:"full_name"`
 		AvatarURL string `json:"avatar_url"`
 		Username  string `json:"username"`
+		Gender    string `json:"gender"`
+		Birthdate string `json:"birthdate"` // YYYY-MM-DD
+		Country   string `json:"country"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -66,6 +108,17 @@ func (h *UsersHandler) UpdateProfile(c *gin.Context) {
 	}
 	if body.Username != "" {
 		user.Username = body.Username
+	}
+	if body.Gender != "" {
+		user.Gender = body.Gender
+	}
+	if body.Birthdate != "" {
+		if t, err := time.Parse("2006-01-02", body.Birthdate); err == nil {
+			user.Birthdate = &t
+		}
+	}
+	if body.Country != "" {
+		user.Country = body.Country
 	}
 	if err := h.DB.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})

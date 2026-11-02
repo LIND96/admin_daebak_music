@@ -41,8 +41,11 @@ func main() {
 	{
 		auth := api.Group("/auth")
 		{
-			auth.POST("/register", authH.Register)
+			// Register publik dimatikan. Admin dibuat via bootstrap / POST /api/users.
+			auth.POST("/bootstrap-admin", authH.BootstrapAdmin)
 			auth.POST("/login", authH.Login)
+			auth.POST("/google", authH.GoogleLogin)
+			auth.POST("/refresh", authH.Refresh)
 			auth.POST("/logout", middleware.Auth(cfg), authH.Logout)
 			auth.GET("/me", middleware.Auth(cfg), authH.Me)
 		}
@@ -50,8 +53,9 @@ func main() {
 		users := api.Group("/users")
 		users.Use(middleware.Auth(cfg))
 		{
-			users.GET("", usersH.List)
-			users.GET("/:id", usersH.GetByID)
+			users.GET("", middleware.RequireRole("admin"), usersH.List)
+			users.GET("/:id", middleware.RequireRole("admin"), usersH.GetByID)
+			users.POST("", middleware.RequireRole("admin"), usersH.Create)
 			users.PATCH("/me", usersH.UpdateProfile)
 		}
 	}

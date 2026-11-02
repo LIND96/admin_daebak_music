@@ -41,3 +41,19 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireRole aborts with 403 unless the authenticated user has one of the roles.
+func RequireRole(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(roles))
+	for _, r := range roles {
+		allowed[r] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		role, _ := c.Get("role")
+		if _, ok := allowed[role.(string)]; !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden: insufficient role"})
+			return
+		}
+		c.Next()
+	}
+}

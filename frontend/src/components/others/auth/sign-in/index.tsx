@@ -3,11 +3,11 @@
 import { Link } from "@/i18n/navigation";
 import { ChevronLeftIcon } from "@/icons";
 import { cn } from "@/utils";
-import AuthDivider from "../divider";
 import SignInFormFields from "./form";
 import SignInHeader from "./header";
-import { SocialButtons } from "./social-button";
 
+// Admin-only: tidak ada social login (Google khusus customer mobile)
+// dan tidak ada link signup (register publik dimatikan).
 export default function SignIn() {
   return (
     <div className={cn("flex w-full flex-1 flex-col lg:w-1/2")}>
@@ -26,21 +26,7 @@ export default function SignIn() {
           <SignInHeader />
 
           <div>
-            <SocialButtons />
-            <AuthDivider />
             <SignInFormFields />
-
-            <div className="mt-5">
-              <p className="text-center text-sm font-normal text-gray-700 sm:text-start dark:text-gray-400">
-                Don&apos;t have an account?{" "}
-                <Link
-                  href="/signup"
-                  className="text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                >
-                  Sign Up
-                </Link>
-              </p>
-            </div>
           </div>
         </div>
       </div>

@@ -1,1 +1,468 @@
-{"auth":{"scheme":"bearer","type":"bearer"},"event":[{"listen":"prerequest","script":{"exec":[""],"type":"text/javascript"}},{"listen":"test","script":{"exec":[""],"type":"text/javascript"}}],"info":{"_postman_id":"admin-daebak-music-backend","description":"Collection API backend admin_daebak_music (Gin). Base URL default http://localhost:8080 sesuai .env.example PORT=8080. Auth memakai JWT via httpOnly cookie `token` (primary) atau header `Authorization: Bearer {{token}}` (backward compat, lihat internal/middleware/auth.go). Cara pakai: 1) jalankan Register/Login, token otomatis tersimpan ke collection variable `token` via Test script. 2) request bertanda Auth akan kirim Bearer token otomatis.","name":"admin_daebak_music - Backend API","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"description":"Health check tanpa auth (cmd/server/main.go).","item":[{"name":"GET Health","request":{"header":[],"method":"GET","url":{"host":["{{baseUrl}}"],"path":["health"],"raw":"{{baseUrl}}/health"}}}],"name":"Health"},{"item":[{"event":[{"listen":"test","script":{"exec":["var json = pm.response.json();","if (json.token) {","pm.collectionVariables.set('token', json.token);","}","if (json.user && json.user.id) {","pm.collectionVariables.set('userId', json.user.id);","}"],"type":"text/javascript"}}],"name":"POST Register","request":{"body":{"mode":"raw","options":{"raw":{"language":"json"}},"raw":"{\n  \"email\": \"admin@daebak.test\",\n  \"username\": \"daebak_admin\",\n  \"password\": \"secret123\",\n  \"full_name\": \"Daebak Admin\"\n}"},"header":[{"key":"Content-Type","value":"application/json"}],"method":"POST","url":{"host":["{{baseUrl}}"],"path":["api","auth","register"],"raw":"{{baseUrl}}/api/auth/register"}}},{"event":[{"listen":"test","script":{"exec":["var json = pm.response.json();","if (json.token) {","pm.collectionVariables.set('token', json.token);","}","if (json.user && json.user.id) {","pm.collectionVariables.set('userId', json.user.id);","}"],"type":"text/javascript"}}],"name":"POST Login","request":{"body":{"mode":"raw","options":{"raw":{"language":"json"}},"raw":"{\n  \"email\": \"admin@daebak.test\",\n  \"password\": \"secret123\"\n}"},"header":[{"key":"Content-Type","value":"application/json"}],"method":"POST","url":{"host":["{{baseUrl}}"],"path":["api","auth","login"],"raw":"{{baseUrl}}/api/auth/login"}}},{"name":"POST Logout (auth)","request":{"auth":{"bearer":[{"key":"token","type":"string","value":"{{token}}"}],"type":"bearer"},"header":[],"method":"POST","url":{"host":["{{baseUrl}}"],"path":["api","auth","logout"],"raw":"{{baseUrl}}/api/auth/logout"}}},{"name":"GET Me (auth)","request":{"auth":{"bearer":[{"key":"token","type":"string","value":"{{token}}"}],"type":"bearer"},"header":[],"method":"GET","url":{"host":["{{baseUrl}}"],"path":["api","auth","me"],"raw":"{{baseUrl}}/api/auth/me"}}}],"name":"Auth"},{"item":[{"name":"GET List Users (auth)","request":{"auth":{"bearer":[{"key":"token","type":"string","value":"{{token}}"}],"type":"bearer"},"header":[],"method":"GET","url":{"host":["{{baseUrl}}"],"path":["api","users"],"raw":"{{baseUrl}}/api/users"}}},{"name":"GET User by ID (auth)","request":{"auth":{"bearer":[{"key":"token","type":"string","value":"{{token}}"}],"type":"bearer"},"header":[],"method":"GET","url":{"host":["{{baseUrl}}"],"path":["api","users","{{userId}}"],"raw":"{{baseUrl}}/api/users/{{userId}}","variable":[{"key":"userId","value":"1"}]}}},{"name":"PATCH Update Profile Me (auth)","request":{"auth":{"bearer":[{"key":"token","type":"string","value":"{{token}}"}],"type":"bearer"},"body":{"mode":"raw","options":{"raw":{"language":"json"}},"raw":"{\n  \"full_name\": \"Daebak Updated\",\n  \"avatar_url\": \"https://example.com/avatar.png\",\n  \"username\": \"daebak_admin\"\n}"},"header":[{"key":"Content-Type","value":"application/json"}],"method":"PATCH","url":{"host":["{{baseUrl}}"],"path":["api","users","me"],"raw":"{{baseUrl}}/api/users/me"}}}],"name":"Users"}],"variable":[{"key":"baseUrl","value":"http://localhost:8080"},{"key":"token","value":""},{"key":"userId","value":"1"}]}
+{
+  "info": {
+    "_postman_id": "admin-daebak-music-backend",
+    "name": "admin_daebak_music - Backend API",
+    "description": "Collection API backend admin_daebak_music (Gin). Web = admin-only (email+password). Mobile customer = Google ID token. Register publik DIMATIKAN. Refresh token terpisah + rotasi: admin 24h, customer 90 hari. Cara pakai: 1) bootstrap-admin sekali (setup_key = BOOTSTRAP_SECRET), atau login admin. Token otomatis tersimpan ke variable via Test script. 2) request bertanda Auth kirim Bearer token otomatis.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "scheme": "bearer"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET Health",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "raw": "{{baseUrl}}/health"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST Bootstrap Admin (sekali pakai)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "bootstrap-admin"
+              ],
+              "raw": "{{baseUrl}}/api/auth/bootstrap-admin"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"admin@daebak.test\",\n  \"username\": \"daebak_admin\",\n  \"password\": \"secret123\",\n  \"full_name\": \"Daebak Admin\",\n  \"setup_key\": \"{{bootstrapSecret}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) { pm.collectionVariables.set('token', json.access_token); } else if (json.token) { pm.collectionVariables.set('token', json.token); }",
+                  "if (json.refresh_token) { pm.collectionVariables.set('refreshToken', json.refresh_token); }",
+                  "if (json.user && json.user.id) { pm.collectionVariables.set('userId', json.user.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login Admin (email+password)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ],
+              "raw": "{{baseUrl}}/api/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"admin@daebak.test\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) { pm.collectionVariables.set('token', json.access_token); } else if (json.token) { pm.collectionVariables.set('token', json.token); }",
+                  "if (json.refresh_token) { pm.collectionVariables.set('refreshToken', json.refresh_token); }",
+                  "if (json.user && json.user.id) { pm.collectionVariables.set('userId', json.user.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login Google Customer (mobile)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "google"
+              ],
+              "raw": "{{baseUrl}}/api/auth/google"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"id_token\": \"{{googleIdToken}}\",\n  \"device_info\": \"Pixel 8 / Android 14\",\n  \"username\": \"daebak_cust\",\n  \"photo_url\": \"https://example.com/photo.jpg\",\n  \"gender\": \"male\",\n  \"birthdate\": \"1998-05-20\",\n  \"country\": \"ID\",\n  \"device_brand\": \"Google\",\n  \"device_model\": \"Pixel 8\",\n  \"os_version\": \"Android 14\",\n  \"platform\": \"android\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) { pm.collectionVariables.set('token', json.access_token); } else if (json.token) { pm.collectionVariables.set('token', json.token); }",
+                  "if (json.refresh_token) { pm.collectionVariables.set('refreshToken', json.refresh_token); }",
+                  "if (json.user && json.user.id) { pm.collectionVariables.set('userId', json.user.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Refresh (rotasi)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/auth/refresh"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) { pm.collectionVariables.set('token', json.access_token); } else if (json.token) { pm.collectionVariables.set('token', json.token); }",
+                  "if (json.refresh_token) { pm.collectionVariables.set('refreshToken', json.refresh_token); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Logout (auth, revoke refresh)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ],
+              "raw": "{{baseUrl}}/api/auth/logout"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Me (auth)",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/api/auth/me"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "POST Create User (admin only)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "raw": "{{baseUrl}}/api/users"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"staff@daebak.test\",\n  \"username\": \"daebak_staff\",\n  \"password\": \"secret123\",\n  \"full_name\": \"Daebak Staff\",\n  \"role\": \"customer\"\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List Users (admin only)",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "raw": "{{baseUrl}}/api/users"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET User by ID (admin only)",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}"
+              ],
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH Update Profile Me (auth)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/api/users/me"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"full_name\": \"Daebak Updated\",\n  \"avatar_url\": \"https://example.com/avatar.png\",\n  \"username\": \"daebak_cust\",\n  \"gender\": \"male\",\n  \"birthdate\": \"1998-05-20\",\n  \"country\": \"ID\"\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": "1"
+    },
+    {
+      "key": "bootstrapSecret",
+      "value": "change-me-bootstrap-secret"
+    },
+    {
+      "key": "googleIdToken",
+      "value": "PASTE_GOOGLE_ID_TOKEN_HERE"
+    }
+  ]
+}

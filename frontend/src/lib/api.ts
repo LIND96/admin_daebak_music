@@ -7,14 +7,23 @@ export type User = {
   full_name: string;
   avatar_url: string;
   role: string;
+  auth_provider?: string;
   created_at: string;
   updated_at: string;
 };
 
-export type AuthResponse = {
+export type SessionResponse = {
+  access_token: string;
+  refresh_token: string;
+  /** Alias for access_token, kept for backward compat. */
   token: string;
+  expires_in: number;
+  refresh_expires_in: number;
   user: User;
 };
+
+// Backward compat: existing code reads .token / .user.
+export type AuthResponse = SessionResponse;
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
@@ -23,7 +32,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
 
   // Cookie httpOnly dikirim otomatis via credentials:include.
-  // Tidak lagi baca localStorage / header Authorization.
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
@@ -37,14 +45,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (body: { email: string; username: string; password: string; full_name?: string }) =>
-    request<AuthResponse>("/api/auth/register", { method: "POST", body: JSON.stringify(body) }),
+  // Register publik dimatikan. Admin dibuat via bootstrap / POST /api/users oleh admin.
+  bootstrapAdmin: (body: { email: string; username: string; password: string; full_name?: string; setup_key: string }) =>
+    request<SessionResponse>("/api/auth/bootstrap-admin", { method: "POST", body: JSON.stringify(body) }),
   login: (body: { email: string; password: string }) =>
-    request<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
-  logout: () => request<{ message: string }>("/api/auth/logout", { method: "POST" }),
+    request<SessionResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  googleLogin: (body: { id_token: string; device_info?: string }) =>
+    request<SessionResponse>("/api/auth/google", { method: "POST", body: JSON.stringify(body) }),
+  refresh: (body?: { refresh_token?: string }) =>
+    request<SessionResponse>("/api/auth/refresh", { method: "POST", body: JSON.stringify(body ?? {}) }),
+  logout: (body?: { refresh_token?: string }) =>
+    request<{ message: string }>("/api/auth/logout", { method: "POST", body: JSON.stringify(body ?? {}) }),
   me: () => request<{ user: User }>("/api/auth/me"),
   listUsers: () => request<{ users: User[]; total: number }>("/api/users"),
   getUser: (id: number) => request<{ user: User }>(`/api/users/${id}`),
-  updateProfile: (body: { full_name?: string; avatar_url?: string; username?: string }) =>
+  createUser: (body: { email: string; username: string; password: string; full_name?: string; role: "admin" | "customer" }) =>
+    request<{ user: User }>("/api/users", { method: "POST", body: JSON.stringify(body) }),
+  updateProfile: (body: { full_name?: string; avatar_url?: string; username?: string; gender?: string; birthdate?: string; country?: string }) =>
     request<{ user: User }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }),
 };

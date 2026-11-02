@@ -58,20 +58,12 @@ export default function LandingHeader() {
                   Open Dashboard
                 </Link>
               ) : (
-                <>
-                  <Link
-                    href="/signin"
-                    className="hidden rounded-lg px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 sm:block dark:text-gray-300 dark:hover:text-white"
-                  >
-                    Sign in
-                  </Link>
-                  <Link
-                    href="/signup"
-                    className="hidden rounded-lg bg-brand-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-500/20 transition-colors hover:bg-brand-600 sm:block"
-                  >
-                    Get Started
-                  </Link>
-                </>
+                <Link
+                  href="/signin"
+                  className="hidden rounded-lg bg-brand-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-500/20 transition-colors hover:bg-brand-600 sm:block"
+                >
+                  Sign In
+                </Link>
               ))}
 
             <button
@@ -119,20 +111,12 @@ export default function LandingHeader() {
                   Open Dashboard
                 </Link>
               ) : (
-                <>
-                  <Link
-                    href="/signin"
-                    className="block rounded-lg border border-gray-200 px-4 py-3 text-center font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                  >
-                    Sign in
-                  </Link>
-                  <Link
-                    href="/signup"
-                    className="block rounded-lg bg-brand-500 px-4 py-3 text-center font-semibold text-white"
-                  >
-                    Get Started Free
-                  </Link>
-                </>
+                <Link
+                  href="/signin"
+                  className="block rounded-lg bg-brand-500 px-4 py-3 text-center font-semibold text-white"
+                >
+                  Sign In
+                </Link>
               ))}
           </div>
         </nav>

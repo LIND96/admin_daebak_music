@@ -16,56 +16,54 @@ Browser (Next.js)  --HTTP/JSON-->  Gin API (Go)  --SQL-->  PostgreSQL
 
 ## Flow Register
 
-### Frontend
+Register publik **dimatikan**. Alurnya diganti dua endpoint khusus:
 
-1. Pengguna membuka halaman `/signup` dan mengisi form (first/last name, email, password).
-2. Saat submit, form `SignUpFormFields` memanggil `useAuth().register(...)` (username diisi dari bagian lokal email, full name dari first+last name).
-3. `AuthProvider.register` memanggil `api.register(...)` (POST `/api/auth/register`).
-4. Jika sukses, cookie httpOnly `token` diset oleh backend dan state `user` di-set, lalu redirect ke `/dashboard`.
+### Bootstrap admin pertama (sekali pakai)
 
-### Backend
+1. Client `POST /api/auth/bootstrap-admin` dengan `{ email, username, password, full_name?, setup_key }`.
+2. Backend tolak (`403`) jika `setup_key != BOOTSTRAP_SECRET` atau admin sudah ada.
+3. Buat `User{role: admin, auth_provider: email}`, terbitkan access (1h) + refresh (24h), set cookie, response `{ access_token, refresh_token, user }`.
 
-1. Handler `AuthHandler.Register` mem-bind JSON ke `registerRequest` (validasi binding).
-2. Password di-hash dengan bcrypt (`utils.HashPassword`).
-3. Buat record `User` di database (GORM `Create`).
-4. Jika email/username duplikat, kembalikan `409 Conflict`.
-5. Generate JWT (`utils.GenerateToken`) berisi `user_id`, `username`, `role`.
-6. Set cookie httpOnly `token` (`setAuthCookie`, `SameSite=Lax`) dan response `201 Created` dengan `{ token, user }`.
+### Admin menambah user
 
-### Diagram
+1. Admin login `POST /api/users` dengan `{ email, username, password, full_name?, role: admin|customer }` + Bearer admin.
+2. Handler `UsersHandler.Create` hash password dan buat user (`auth_provider: email`).
 
-```
-User -> Form Register -> api.register -> POST /api/auth/register
-  -> validate -> hash password -> INSERT users -> JWT -> Set-Cookie + {token,user}
-  -> redirect /dashboard
-```
-
-## Flow Login
+## Flow Login Admin (web)
 
 ### Frontend
 
 1. Pengguna membuka `/signin`, mengisi email dan password.
 2. Form sign-in TailAdmin memanggil `useAuth().login(email, password)`.
 3. `AuthProvider.login` memanggil `api.login(...)` (POST `/api/auth/login`).
-4. Jika sukses, cookie httpOnly diset dan redirect ke `/dashboard`.
-5. Jika gagal, tampilkan error inline pada form.
+4. `AuthProvider` menolak state jika `user.role !== "admin"` (web admin-only).
+5. Jika sukses, cookie httpOnly diset dan redirect ke `/dashboard`.
+6. Jika gagal (termasuk akun customer), tampilkan error inline pada form.
 
 ### Backend
 
 1. Handler `AuthHandler.Login` mem-bind JSON ke `loginRequest`.
 2. Cari user berdasarkan email (`Where("email = ?")`).
-3. Jika tidak ditemukan, kembalikan `401 Unauthorized`.
+3. Jika `role != "admin"`, kembalikan `403 Forbidden` (customer wajib Google login).
 4. Bandingkan password dengan bcrypt (`utils.CheckPassword`).
-5. Jika salah, kembalikan `401 Unauthorized`.
-6. Generate JWT, set cookie httpOnly, dan response `{ token, user }`.
+5. Generate access JWT (1h) + refresh token opaque (24h untuk admin), simpan hash di `refresh_tokens`.
+6. Set cookie httpOnly `token` + `refresh_token`, response `{ access_token, refresh_token, user }`.
 
-### Diagram
+## Flow Login Google (customer mobile)
 
-```
-User -> Form Login -> api.login -> POST /api/auth/login
-  -> cari user by email -> verifikasi password -> JWT -> Set-Cookie + {token,user}
-  -> redirect /dashboard
-```
+1. HP ambil `id_token` via Google SDK (Android/iOS), kirim `POST /api/auth/google` beserta data koleksi:
+   `{ id_token, device_info?, username?, photo_url?, gender?, birthdate? (YYYY-MM-DD), country?, device_brand?, device_model?, os_version?, platform? }`.
+   Contoh: merk HP (`Samsung`), versi Android (`Android 15`), negara (`ID`), gender, usia (via `birthdate`), username, foto.
+2. Backend verifikasi via `utils.VerifyGoogleIDToken` (cek `aud` ke `GOOGLE_ANDROID_CLIENT_ID`/`GOOGLE_IOS_CLIENT_ID`, email terverifikasi).
+3. Cari by `google_sub` → jika tidak ada, cocokkan/link by email → jika tidak ada, buat `User{role: customer, auth_provider: google}` (username dari prefix email + suffix unik).
+4. Akun `role=admin` ditolak (`403`) — admin wajib email+password.
+5. Terbitkan access (1h) + refresh (90 hari / 2160h untuk customer), simpan hash, response JSON untuk disimpan di Keychain/Keystore HP.
+
+## Flow Refresh Token (rotasi)
+
+1. Client `POST /api/auth/refresh { refresh_token }` (atau cookie `refresh_token`).
+2. Backend cocokkan hash, cek belum revoked/kedaluwarsa, revoke token lama, terbitkan pasangan baru.
+3. Umur refresh ditentukan role: admin 24h (`REFRESH_EXPIRY_ADMIN`), customer 90 hari (`REFRESH_EXPIRY_CUSTOMER`).
 
 ## Flow Logout
 
@@ -84,13 +82,13 @@ User -> Form Login -> api.login -> POST /api/auth/login
 
 ### Frontend
 
-1. Halaman `/dashboard` dan `/users` dilindungi `src/proxy.ts`; jika belum login, redirect ke `/signin` sebelum halaman render.
-2. Setelah login terkonfirmasi, halaman `/users` memanggil `api.listUsers()` (GET `/api/users`).
+1. Halaman `/dashboard` dan `/users` dilindungi `src/proxy.ts`; jika belum login, redirect ke `/signin` sebelum halaman render. `AuthProvider` juga menolak sesi non-admin.
+2. Setelah login admin terkonfirmasi, halaman `/users` memanggil `api.listUsers()` (GET `/api/users`, admin only).
 3. Render tabel users TailAdmin (avatar, nama, email, role, tanggal join).
 
 ### Backend
 
-1. Middleware `Auth` memvalidasi JWT dari cookie `token` (fallback: header `Authorization`).
+1. Middleware `Auth` memvalidasi JWT dari cookie `token` (fallback: header `Authorization`), lalu `RequireRole("admin")` menolak non-admin (`403`).
 2. Handler `UsersHandler.List` mengambil semua user dari DB.
 3. Response `{ users: [...], total }` (password tidak disertakan).
 
@@ -121,12 +119,13 @@ File: `internal/middleware/auth.go`
 5. Lanjut ke handler (`c.Next()`).
 6. Jika gagal, kembalikan `401 Unauthorized` dan hentikan request.
 
-## Penyimpanan Token (Frontend)
+## Penyimpanan Token
 
-- Token disimpan di cookie httpOnly bernama `token` (diset oleh backend via `Set-Cookie`, flag `HttpOnly`, `SameSite=Lax`).
-- `fetch` selalu memakai `credentials: "include"` agar cookie terkirim.
-- Saat startup, `AuthProvider` memanggil `/api/auth/me` untuk memulihkan sesi.
-- Penjagaan route di `src/proxy.ts` (cek keberadaan cookie): tanpa cookie, semua halaman kecuali `/`, `/signin`, `/signup`, `/error-404` dialihkan ke `/signin`; user ber-cookie yang buka `/signin`/`/signup` dialihkan ke `/dashboard`.
+- Access JWT pendek (1h) + refresh token opaque terpisah disimpan di cookie httpOnly `token` dan `refresh_token` (diset backend via `Set-Cookie`, flag `HttpOnly`, `SameSite=Lax`, path refresh dibatasi `/api/auth`).
+- Umur refresh by role: admin 24h, customer 90 hari. Rotasi di `POST /api/auth/refresh` (token lama di-revoke).
+- `fetch` selalu memakai `credentials: "include"` agar cookie terkirim; mobile menyimpan pasangan token di Keychain/Keystore dan kirim `Authorization: Bearer`.
+- Saat startup, `AuthProvider` memanggil `/api/auth/me` dan menolak sesi non-admin.
+- Penjagaan route di `src/proxy.ts` (cek keberadaan cookie + redirect `/signup` → `/signin` karena register publik mati): tanpa cookie, semua halaman kecuali `/`, `/signin`, `/error-404` dialihkan ke `/signin`; user ber-cookie yang buka `/signin` dialihkan ke `/dashboard`.
 
 ## Catatan Keamanan
 

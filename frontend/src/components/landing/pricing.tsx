@@ -91,7 +91,7 @@ export default function LandingPricing() {
                 ))}
               </ul>
               <Link
-                href="/signup"
+                href="/signin"
                 className={cn(
                   "mt-8 rounded-xl px-6 py-3 text-center font-semibold transition-colors",
                   tier.highlighted

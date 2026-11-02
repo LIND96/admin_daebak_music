@@ -1,0 +1,160 @@
+{
+  "info": {
+    "name": "admin_daebak_music - Customer Google Auth (Mobile)",
+    "description": "Login customer via Google ID token, refresh rotation, profile, logout. Isi variable id_token dengan JWT asli dari Google SDK sebelum Run. Urutan: Google Login -> Get Me -> Refresh Session -> Logout.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "id_token", "value": "PASTE_GOOGLE_ID_TOKEN_HERE" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1 - Google Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/api/auth/google",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_token\": \"{{id_token}}\",\n  \"username\": \"budi Santoso\",\n  \"photo_url\": \"\",\n  \"gender\": \"male\",\n  \"birthdate\": \"1998-05-20\",\n  \"country\": \"ID\",\n  \"device_brand\": \"Samsung\",\n  \"device_model\": \"Galaxy S24\",\n  \"os_version\": \"Android 15\",\n  \"platform\": \"android\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 + token pair returned', function () {",
+              "    pm.response.to.have.status(200);",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.access_token).to.be.a('string');",
+              "    pm.expect(json.refresh_token).to.be.a('string');",
+              "    pm.expect(json.user.role).to.eql('customer');",
+              "    pm.collectionVariables.set('access_token', json.access_token);",
+              "    pm.collectionVariables.set('refresh_token', json.refresh_token);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 - Get Me (Bearer)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{base_url}}/api/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 + customer profile', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().user.role).to.eql('customer');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 - Update My Profile",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": "{{base_url}}/api/users/me",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"full_name\": \"budi Santoso\",\n  \"username\": \"budi Lutfi\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 profile updated', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().user.full_name).to.eql('budi Santoso');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 - Refresh Session (rotation)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/api/auth/refresh",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 + NEW pair (old revoked)', function () {",
+              "    pm.response.to.have.status(200);",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.access_token).to.not.eql(pm.collectionVariables.get('access_token'));",
+              "    pm.collectionVariables.set('access_token', json.access_token);",
+              "    pm.collectionVariables.set('refresh_token', json.refresh_token);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 - Logout (revoke refresh)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": "{{base_url}}/api/auth/logout",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 logged out', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().message).to.eql('logged out successfully');",
+              "});",
+              "pm.test('rotated refresh is now dead', function () {",
+              "    pm.sendRequest({",
+              "        url: pm.collectionVariables.get('base_url') + '/api/auth/refresh',",
+              "        method: 'POST',",
+              "        header: { 'Content-Type': 'application/json' },",
+              "        body: { mode: 'raw', raw: JSON.stringify({ refresh_token: pm.collectionVariables.get('refresh_token') }) }",
+              "    }, function (err, res) {",
+              "        pm.expect(res.code).to.eql(401);",
+              "    });",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
