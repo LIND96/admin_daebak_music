@@ -72,7 +72,7 @@ docker compose down -v
 
 | Variabel | Default (compose) | Keterangan |
 |----------|-------------------|------------|
-| `NEXT_PUBLIC_API_URL` | http://localhost | URL backend API (same-origin via Caddy; build-time). Lokal tanpa docker tetap `http://localhost:8080` via `.env.local`. |
+| `NEXT_PUBLIC_API_URL` | http://localhost | URL backend API. **PENTING: di-bake saat `docker build`** via `build.args` (lihat `frontend/Dockerfile` `ARG`), jadi `environment:` saja tidak cukup. Untuk produksi: `NEXT_PUBLIC_API_URL=https://domain-mu docker compose up --build -d`. Lokal tanpa docker tetap `http://localhost:8080` via `.env.local`. |
 
 ## Catatan
 

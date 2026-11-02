@@ -1,5 +1,8 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
+# Build-time API URL (di-bake ke JS). Diisi via docker compose build.args.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY package*.json ./
 RUN npm ci
 COPY . .

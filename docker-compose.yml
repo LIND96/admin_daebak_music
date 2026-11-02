@@ -38,10 +38,14 @@ services:
       sh -c "cd /app && /server"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # WAJIB: NEXT_PUBLIC_* di-bake saat build, environment: saja tidak cukup.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
     environment:
-      # Same-origin via Caddy: browser memanggil http://localhost/api/* -> backend.
-      NEXT_PUBLIC_API_URL: http://localhost
+      # Same-origin via Caddy: browser memanggil <origin>/api/* -> backend.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
     ports:
       - "3000:3000"
     depends_on:
