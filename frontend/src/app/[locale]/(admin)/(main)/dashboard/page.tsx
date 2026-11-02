@@ -1,40 +1,15 @@
-import DemographicCard from "@/components/main/dashboard/ecommerce/demographic-card";
-import EcommerceMetrics from "@/components/main/dashboard/ecommerce/metrics";
-import MonthlySalesChart from "@/components/main/dashboard/ecommerce/monthly-sales-chart";
-import MonthlyTarget from "@/components/main/dashboard/ecommerce/monthly-target";
-import RecentOrders from "@/components/main/dashboard/ecommerce/recent-orders";
-import StatisticsChart from "@/components/main/dashboard/ecommerce/statistics-chart";
+import TrackingSection from "@/components/main/dashboard/tracking/tracking-section";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Dashboard | TailAdmin - Next.js Admin Dashboard Template",
-  description: "Overview of your music catalog performance.",
+  title: "Dashboard | Daily App Usage",
+  description: "Daily active users, hits per hour, countries and apps.",
 };
 
-export default function Ecommerce() {
+export default function Dashboard() {
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
-      <div className="col-span-12 space-y-6 xl:col-span-7">
-        <EcommerceMetrics />
-
-        <MonthlySalesChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <MonthlyTarget />
-      </div>
-
-      <div className="col-span-12">
-        <StatisticsChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <DemographicCard />
-      </div>
-
-      <div className="col-span-12 xl:col-span-7">
-        <RecentOrders />
-      </div>
+      <TrackingSection />
     </div>
   );
 }

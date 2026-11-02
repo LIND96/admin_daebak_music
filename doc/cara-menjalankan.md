@@ -44,6 +44,10 @@ npm run dev
 
 Frontend akan berjalan di `http://localhost:3000`.
 
+> Dengan Docker + Caddy, akses utama adalah `http://localhost` (port 80):
+> `/api/*` diteruskan ke backend, sisanya ke frontend (lihat `doc/konfigurasi-docker.md`).
+> Produksi: `DOMAIN=app.example.com docker compose up --build` untuk HTTPS otomatis.
+
 ## 4. Alur Penggunaan
 
 1. Bootstrap admin pertama (sekali saja, butuh `BOOTSTRAP_SECRET` dari `.env`):

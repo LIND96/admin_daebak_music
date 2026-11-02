@@ -17,7 +17,7 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	// Auto-migrate for convenience (migrations also provided as SQL files).
-	if err := db.AutoMigrate(&models.User{}, &models.RefreshToken{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.RefreshToken{}, &models.AppUsageEvent{}); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}
 

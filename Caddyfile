@@ -1,0 +1,16 @@
+# Caddy reverse proxy untuk admin_daebak_music.
+# - /api/*  -> backend:8080 (Gin API)
+# - /*      -> frontend:3000 (Next.js standalone)
+# DOMAIN default localhost (HTTP). Untuk produksi set DOMAIN ke domain publik,
+# Caddy otomatis menerbitkan HTTPS via Let's Encrypt (butuh port 80/443 terbuka).
+{$DOMAIN:localhost} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
