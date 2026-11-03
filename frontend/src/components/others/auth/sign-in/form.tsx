@@ -44,6 +44,7 @@ export default function SignInFormFields() {
     try {
       await login(data.email, data.password);
       router.push("/dashboard");
+      router.refresh();
     } catch (err) {
       setServerError(err instanceof Error ? err.message : "Sign in failed");
     }
