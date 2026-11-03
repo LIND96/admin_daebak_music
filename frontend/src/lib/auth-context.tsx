@@ -52,9 +52,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await api.login({ email, password });
     assertAdmin(res.user);
     setUser(res.user);
-  };
-
-  const register = async () => {
+    // Paksa revalidasi server-component (proxy/signin baca cookie terbaru).
+    router.refresh();
+  };  const register = async () => {
     throw new Error("Registrasi publik dimatikan. Minta admin untuk buatkan akun.");
   };
 
@@ -66,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setUser(null);
       router.push("/signin");
+      router.refresh();
     }
   };
 

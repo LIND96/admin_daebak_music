@@ -14,7 +14,13 @@ function hourLabel(h: number) {
   return `${String(h).padStart(2, "0")}:00`;
 }
 
-export default function HourlyChart({ hourly }: { hourly: HourlyBucket[] }) {
+export default function HourlyChart({
+  hourly,
+  scopeNote,
+}: {
+  hourly: HourlyBucket[];
+  scopeNote?: string;
+}) {
   const { theme } = useTheme();
 
   const categories = useMemo(
@@ -121,6 +127,7 @@ export default function HourlyChart({ hourly }: { hourly: HourlyBucket[] }) {
       </h3>
       <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
         Semua tembakan tercatat, 00:00–23:00
+        {scopeNote ? ` · Filter negara: ${scopeNote}` : ""}
       </p>
       <div className="mt-4 max-w-full overflow-x-auto">
         <div className="min-w-150 xl:min-w-full">

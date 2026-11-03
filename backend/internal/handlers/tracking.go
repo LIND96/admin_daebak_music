@@ -26,6 +26,45 @@ type trackDailyUseRequest struct {
 	Email          string `json:"email"`
 }
 
+// parseCountryCodes accepts repeated ?country_code=ID&country_code=US and/or
+// comma-separated ?country_code=ID,US. Returns uppercased, deduped codes.
+func parseCountryCodes(raw []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, r := range raw {
+		for _, part := range strings.Split(r, ",") {
+			cc := strings.ToUpper(strings.TrimSpace(part))
+			if cc == "" {
+				continue
+			}
+			if _, ok := seen[cc]; !ok {
+				seen[cc] = struct{}{}
+				out = append(out, cc)
+			}
+		}
+	}
+	return out
+}
+
+// parseApps accepts repeated/comma-separated ?apps_name=. Lowercased, deduped.
+func parseApps(raw []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, r := range raw {
+		for _, part := range strings.Split(r, ",") {
+			app := strings.ToLower(strings.TrimSpace(part))
+			if app == "" {
+				continue
+			}
+			if _, ok := seen[app]; !ok {
+				seen[app] = struct{}{}
+				out = append(out, app)
+			}
+		}
+	}
+	return out
+}
+
 var jakartaLoc *time.Location
 
 func init() {
@@ -120,6 +159,11 @@ type countryStat struct {
 	UniqueDevices int    `json:"unique_devices"`
 }
 
+type optionCountry struct {
+	Country     string `json:"country"`
+	CountryCode string `json:"country_code"`
+}
+
 type appStat struct {
 	AppsName      string `json:"apps_name"`
 	Hits          int    `json:"hits"`
@@ -130,7 +174,8 @@ type appStat struct {
 // and top countries for a given date (YYYY-MM-DD, Asia/Jakarta).
 func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	dateStr := strings.TrimSpace(c.Query("date"))
-	appsName := strings.ToLower(strings.TrimSpace(c.Query("apps_name")))
+	appsNames := parseApps(c.QueryArray("apps_name"))
+	countryCodes := parseCountryCodes(c.QueryArray("country_code"))
 
 	if dateStr == "" {
 		dateStr = jakartaNow().Format("2006-01-02")
@@ -138,6 +183,34 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYY-MM-DD"})
 		return
+	}
+
+	// Optional app scope (multi-select). Lowercased on write.
+	applyApps := func(sql *string, args *[]any) {
+		if len(appsNames) == 0 {
+			return
+		}
+		placeholders := make([]string, len(appsNames))
+		for i, app := range appsNames {
+			placeholders[i] = "?"
+			*args = append(*args, app)
+		}
+		*sql += ` AND apps_name IN (` + strings.Join(placeholders, ",") + `)`
+	}
+
+	// Optional country scope (multi-select). Matches country_code first,
+	// falls back to legacy rows that only have country (= code, uppercased).
+	applyCountry := func(sql *string, args *[]any) {
+		if len(countryCodes) == 0 {
+			return
+		}
+		placeholders := make([]string, len(countryCodes))
+		for i, cc := range countryCodes {
+			placeholders[i] = "?"
+			*args = append(*args, cc)
+		}
+		*sql += ` AND COALESCE(NULLIF(UPPER(country_code), ''), NULLIF(UPPER(country), '')) IN (` +
+			strings.Join(placeholders, ",") + `)`
 	}
 
 	// Hourly buckets in WIB. Use Raw so GROUP BY 1 positional isn't quoted by GORM.
@@ -150,10 +223,8 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	hourSQL := `SELECT EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'Asia/Jakarta')::int AS hour, COUNT(*) AS hits, COUNT(DISTINCT device_id) AS unique_devices
 		FROM daily_app_usages WHERE usage_date = ?`
 	hourArgs := []any{dateStr}
-	if appsName != "" {
-		hourSQL += ` AND apps_name = ?`
-		hourArgs = append(hourArgs, appsName)
-	}
+	applyApps(&hourSQL, &hourArgs)
+	applyCountry(&hourSQL, &hourArgs)
 	hourSQL += ` GROUP BY 1 ORDER BY 1`
 	if err := h.DB.Raw(hourSQL, hourArgs...).Scan(&hourRows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch hourly stats: " + err.Error()})
@@ -179,10 +250,8 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	var totals totalRow
 	totalSQL := `SELECT COUNT(*) AS hits, COUNT(DISTINCT device_id) AS dau FROM daily_app_usages WHERE usage_date = ?`
 	totalArgs := []any{dateStr}
-	if appsName != "" {
-		totalSQL += ` AND apps_name = ?`
-		totalArgs = append(totalArgs, appsName)
-	}
+	applyApps(&totalSQL, &totalArgs)
+	applyCountry(&totalSQL, &totalArgs)
 	if err := h.DB.Raw(totalSQL, totalArgs...).Scan(&totals).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch totals: " + err.Error()})
 		return
@@ -199,10 +268,8 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 			COUNT(*) AS hits, COUNT(DISTINCT device_id) AS unique_devices
 		FROM daily_app_usages WHERE usage_date = ?`
 	countryArgs := []any{dateStr}
-	if appsName != "" {
-		countrySQL += ` AND apps_name = ?`
-		countryArgs = append(countryArgs, appsName)
-	}
+	applyApps(&countrySQL, &countryArgs)
+	applyCountry(&countrySQL, &countryArgs)
 	countrySQL += ` GROUP BY 1, 2 ORDER BY hits DESC LIMIT 10`
 	if err := h.DB.Raw(countrySQL, countryArgs...).Scan(&countries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch country stats: " + err.Error()})
@@ -212,12 +279,16 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 		countries = []countryStat{}
 	}
 
-	// Per-app breakdown for the same date (unfiltered, so apps can be compared).
-	// Unique per apps_name based on DISTINCT device_id.
+	// Per-app breakdown. Respects the country scope (global slice); when apps
+	// are selected it shows only those, otherwise all apps for comparison.
 	var byApp []appStat
 	appSQL := `SELECT apps_name AS apps_name, COUNT(*) AS hits, COUNT(DISTINCT device_id) AS unique_devices
-		FROM daily_app_usages WHERE usage_date = ? GROUP BY 1 ORDER BY hits DESC LIMIT 20`
-	if err := h.DB.Raw(appSQL, dateStr).Scan(&byApp).Error; err != nil {
+		FROM daily_app_usages WHERE usage_date = ?`
+	appArgs := []any{dateStr}
+	applyApps(&appSQL, &appArgs)
+	applyCountry(&appSQL, &appArgs)
+	appSQL += ` GROUP BY 1 ORDER BY hits DESC LIMIT 20`
+	if err := h.DB.Raw(appSQL, appArgs...).Scan(&byApp).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch apps stats: " + err.Error()})
 		return
 	}
@@ -225,14 +296,85 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 		byApp = []appStat{}
 	}
 
+	// Option lists for the filter modal. Scoped by date only (ignores the
+	// active apps/country filters) so the pill lists always match the
+	// selected date and never collapse to the filtered subset.
+	var allApps []string
+	allAppSQL := `SELECT apps_name AS apps_name FROM daily_app_usages WHERE usage_date = ? GROUP BY 1 ORDER BY 1`
+	if err := h.DB.Raw(allAppSQL, dateStr).Scan(&allApps).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch apps options: " + err.Error()})
+		return
+	}
+	if allApps == nil {
+		allApps = []string{}
+	}
+	var allCountries []countryStat
+	allCountrySQL := `SELECT
+			COALESCE(NULLIF(UPPER(country_code), ''), NULLIF(UPPER(country), ''), 'UNKNOWN') AS country_code,
+			COALESCE(NULLIF(country, ''), NULLIF(country_code, ''), 'UNKNOWN') AS country,
+			COUNT(*) AS hits, COUNT(DISTINCT device_id) AS unique_devices
+		FROM daily_app_usages WHERE usage_date = ? GROUP BY 1, 2 ORDER BY 2`
+	if err := h.DB.Raw(allCountrySQL, dateStr).Scan(&allCountries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch country options: " + err.Error()})
+		return
+	}
+	if allCountries == nil {
+		allCountries = []countryStat{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"date":        dateStr,
-		"timezone":    "Asia/Jakarta",
-		"apps_name":   appsName,
+		"date":         dateStr,
+		"timezone":     "Asia/Jakarta",
+		"apps_name":    strings.Join(appsNames, ","),
+		"country_code": strings.Join(countryCodes, ","),
 		"total_hits":  totalHits,
 		"dau":         dau,
 		"hourly":      hourly,
 		"by_country":  countries,
 		"by_app":      byApp,
+		"all_apps":    allApps,
+		"all_countries": allCountries,
+	})
+}
+
+// FilterOptions returns distinct apps and countries that have hits on a given
+// date (Asia/Jakarta). Lightweight source for the dashboard filter modal pills,
+// so the lists always follow the selected date.
+func (h *TrackingHandler) FilterOptions(c *gin.Context) {
+	dateStr := strings.TrimSpace(c.Query("date"))
+	if dateStr == "" {
+		dateStr = jakartaNow().Format("2006-01-02")
+	}
+	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYY-MM-DD"})
+		return
+	}
+
+	var apps []string
+	if err := h.DB.Raw(`SELECT apps_name AS apps_name FROM daily_app_usages
+		WHERE usage_date = ? GROUP BY 1 ORDER BY 1`, dateStr).Scan(&apps).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch apps options: " + err.Error()})
+		return
+	}
+	if apps == nil {
+		apps = []string{}
+	}
+	var countries []optionCountry
+	if err := h.DB.Raw(`SELECT
+			COALESCE(NULLIF(UPPER(country_code), ''), NULLIF(UPPER(country), ''), 'UNKNOWN') AS country_code,
+			COALESCE(NULLIF(country, ''), NULLIF(country_code, ''), 'UNKNOWN') AS country
+		FROM daily_app_usages WHERE usage_date = ? GROUP BY 1, 2 ORDER BY 2`, dateStr).Scan(&countries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch country options: " + err.Error()})
+		return
+	}
+	if countries == nil {
+		countries = []optionCountry{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"date":      dateStr,
+		"timezone":  "Asia/Jakarta",
+		"apps":      apps,
+		"countries": countries,
 	})
 }

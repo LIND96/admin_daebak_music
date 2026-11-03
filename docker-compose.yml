@@ -66,6 +66,21 @@ services:
       - backend
       - frontend
 
+  dozle:
+    image: amir20/dozzle:latest
+    # Bind ke localhost VPS saja (127.0.0.1) — akses via SSH tunnel, bukan publik.
+    ports:
+      - "127.0.0.1:9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_LEVEL: info
+      DOZZLE_USERNAME: ${DOZZLE_USERNAME:-admin}
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-ganti-password-dozle}
+    depends_on:
+      - backend
+      - frontend
+
 volumes:
   pgdata:
   caddy_data:

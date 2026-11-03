@@ -1,8 +1,9 @@
 "use client";
 
 import type { CountryStat } from "@/lib/api";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import CountryMap, { type Marker } from "../ecommerce/demographic-card/country-map";
+import CountryFlag from "./country-flag";
 
 // Titik tengah kasar tiap kode ISO 3166-1 alpha-2 untuk marker peta.
 // Key tambahan berupa nama/alias lama tetap didukung karena backend
@@ -230,35 +231,6 @@ function codeForMarker(d: { country: string; country_code?: string }): string {
 
 function countryLabel(code: string, fallback?: string): string {
   return COUNTRY_COORDS[normalizeCountry(code)]?.name ?? fallback ?? code;
-}
-
-function flagCode(code: string): string | null {
-  const c = normalizeCountry(code);
-  // flagcdn hanya dukung ISO alpha-2
-  if (/^[A-Z]{2}$/.test(c)) return c.toLowerCase();
-  return null;
-}
-
-function CountryFlag({ code, alt }: { code: string; alt: string }) {
-  const [failed, setFailed] = useState(false);
-  const fc = flagCode(code);
-  if (!fc || failed) {
-    return (
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xs font-bold text-brand-500 dark:bg-brand-500/10">
-        {code.slice(0, 2).toUpperCase()}
-      </div>
-    );
-  }
-  return (
-    <img
-      src={`https://flagcdn.com/w80/${fc}.png`}
-      srcSet={`https://flagcdn.com/w80/${fc}.png 1x, https://flagcdn.com/w160/${fc}.png 2x`}
-      alt={alt}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="size-8 shrink-0 rounded-lg object-cover"
-    />
-  );
 }
 
 export default function CountriesChart({ data }: { data: CountryStat[] }) {

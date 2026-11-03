@@ -65,6 +65,7 @@ func main() {
 			// Anonymous mobile hit, every call inserts a row.
 			tracking.POST("/daily-use", trackH.TrackDailyUse)
 			tracking.GET("/stats/daily", middleware.Auth(cfg), middleware.RequireRole("admin"), trackH.DailyStats)
+			tracking.GET("/filter-options", middleware.Auth(cfg), middleware.RequireRole("admin"), trackH.FilterOptions)
 		}
 	}
 
