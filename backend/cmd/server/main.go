@@ -26,6 +26,11 @@ func main() {
 
 	r := gin.Default()
 
+	// Percaya X-Forwarded-For dari reverse proxy di jaringan privat (Caddy)
+	// agar c.ClientIP() = IP asli user, bukan IP container Caddy.
+	// Tanpa ini semua user berbagi 1 bucket rate-limit (saling memblokir).
+	_ = r.SetTrustedProxies([]string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
+
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{cfg.FrontendURL, "http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -43,8 +48,8 @@ func main() {
 		auth := api.Group("/auth")
 		{
 			// Register publik dimatikan. Admin dibuat via bootstrap / POST /api/users.
-			auth.POST("/bootstrap-admin", authH.BootstrapAdmin)
-			auth.POST("/login", authH.Login)
+			auth.POST("/bootstrap-admin", middleware.LoginRateLimit(), authH.BootstrapAdmin)
+			auth.POST("/login", middleware.LoginRateLimit(), authH.Login)
 			auth.POST("/google", authH.GoogleLogin)
 			auth.POST("/refresh", authH.Refresh)
 			auth.POST("/logout", middleware.Auth(cfg), authH.Logout)
