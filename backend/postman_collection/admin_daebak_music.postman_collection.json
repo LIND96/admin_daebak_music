@@ -435,6 +435,49 @@
               ]
             }
           }
+        },
+        {
+          "name": "PATCH Change Password Me (auth)",
+          "request": {
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ],
+              "raw": "{{baseUrl}}/api/users/me/password"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"current_password\": \"secret123\",\n  \"new_password\": \"secret-baru-123\"\n}"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
         }
       ]
     },

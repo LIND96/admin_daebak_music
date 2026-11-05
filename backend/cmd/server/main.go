@@ -63,6 +63,7 @@ func main() {
 			users.GET("/:id", middleware.RequireRole("admin"), usersH.GetByID)
 			users.POST("", middleware.RequireRole("admin"), usersH.Create)
 			users.PATCH("/me", usersH.UpdateProfile)
+			users.PATCH("/me/password", usersH.ChangePassword)
 		}
 
 		tracking := api.Group("/tracking")

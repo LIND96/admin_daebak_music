@@ -259,7 +259,10 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	totalHits = totals.Hits
 	dau = totals.DAU
 
-	// Top countries grouped by country_code (fallback to country name for legacy rows).
+	// Countries grouped by country_code (fallback to country name for legacy rows).
+	// No LIMIT: the map must render every country for the date (max ~250),
+	// while the "top 5" list slices client-side. Keeps the country filter working
+	// because applyCountry is still applied above.
 	// Use Raw for the same quoting reason.
 	var countries []countryStat
 	countrySQL := `SELECT
@@ -270,7 +273,7 @@ func (h *TrackingHandler) DailyStats(c *gin.Context) {
 	countryArgs := []any{dateStr}
 	applyApps(&countrySQL, &countryArgs)
 	applyCountry(&countrySQL, &countryArgs)
-	countrySQL += ` GROUP BY 1, 2 ORDER BY hits DESC LIMIT 10`
+	countrySQL += ` GROUP BY 1, 2 ORDER BY hits DESC LIMIT 250`
 	if err := h.DB.Raw(countrySQL, countryArgs...).Scan(&countries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch country stats: " + err.Error()})
 		return

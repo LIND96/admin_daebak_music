@@ -58,7 +58,7 @@ const COUNTRY_COORDS: Record<string, { name: string; latLng: [number, number] }>
   BA: { name: "Bosnia and Herzegovina", latLng: [43.91, 17.67] },
   BW: { name: "Botswana", latLng: [-22.32, 23.94] },
   BR: { name: "Brazil", latLng: [-14.23, -51.92] },
-  BN: { name: "Brunei", latLng: [35.67, 53.93] },
+  BN: { name: "Brunei", latLng: [4.53, 114.72] },
   BG: { name: "Bulgaria", latLng: [42.73, 25.48] },
   BF: { name: "Burkina Faso", latLng: [12.23, -1.56] },
   BI: { name: "Burundi", latLng: [-3.37, 29.91] },
@@ -217,6 +217,7 @@ const COUNTRY_COORDS: Record<string, { name: string; latLng: [number, number] }>
   VE: { name: "Venezuela", latLng: [6.42, -66.58] },
   ZM: { name: "Zambia", latLng: [-13.13, 27.84] },
   ZW: { name: "Zimbabwe", latLng: [-19.01, 29.15] },
+  AX: { name: "Åland", latLng: [60.18, 19.93] },
 };
 
 function normalizeCountry(code: string): string {
@@ -289,8 +290,8 @@ export default function CountriesChart({ data }: { data: CountryStat[] }) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-5">
-        {data.slice(0, 5).map((d) => {
+      <div className="flex max-h-72 flex-col gap-5 overflow-y-auto pr-1">
+        {data.map((d) => {
           const pct = totalUnique > 0 ? (d.unique_devices / totalUnique) * 100 : 0;
           const code = codeForMarker(d);
           return (

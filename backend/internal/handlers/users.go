@@ -24,6 +24,56 @@ type createUserRequest struct {
 	Role     string `json:"role" binding:"required,oneof=admin customer"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required,min=6"`
+}
+
+// ChangePassword mengganti password akun sendiri. Password lama wajib benar,
+// lalu SEMUA refresh token user di-revoke (logout di semua perangkat/sesi —
+// login ulang dengan password baru). Access JWT yang sedang berjalan tetap
+// valid sampai kedaluwarsa (maks 1 jam).
+func (h *UsersHandler) ChangePassword(c *gin.Context) {
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.CurrentPassword == req.NewPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new password must be different"})
+		return
+	}
+
+	userID := c.GetUint("userID")
+	var user models.User
+	if err := h.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if user.Password == "" || !utils.CheckPassword(user.Password, req.CurrentPassword) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
+		return
+	}
+
+	hashed, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+	user.Password = hashed
+	if err := h.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	now := time.Now()
+	_ = h.DB.Model(&models.RefreshToken{}).
+		Where("user_id = ? AND revoked_at IS NULL", user.ID).
+		Update("revoked_at", now).Error
+
+	c.JSON(http.StatusOK, gin.H{"message": "password updated, please login again"})
+}
+
 // Create lets an admin provision email/password accounts (register is disabled).
 func (h *UsersHandler) Create(c *gin.Context) {
 	var req createUserRequest
