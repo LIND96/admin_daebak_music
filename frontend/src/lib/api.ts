@@ -63,6 +63,8 @@ export const api = {
     request<{ user: User }>("/api/users", { method: "POST", body: JSON.stringify(body) }),
   updateProfile: (body: { full_name?: string; avatar_url?: string; username?: string; gender?: string; birthdate?: string; country?: string }) =>
     request<{ user: User }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }),
+  changePassword: (body: { current_password: string; new_password: string }) =>
+    request<{ message: string }>("/api/users/me/password", { method: "PATCH", body: JSON.stringify(body) }),
   trackDailyUse: (body: { device_id: string; apps_name: string; android_version?: string; device_brand?: string; device_model?: string; country?: string; country_code?: string; email?: string }) =>
     request<{ status: string }>("/api/tracking/daily-use", { method: "POST", body: JSON.stringify(body) }),
   getDailyStats: (params: { date: string; apps_name?: string; country_code?: string }) => {

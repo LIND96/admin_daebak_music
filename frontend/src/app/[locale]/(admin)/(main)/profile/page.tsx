@@ -21,13 +21,18 @@ function getInitials(name: string) {
 }
 
 export default function ProfilePage() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPw, setIsChangingPw] = useState(false);
+  const [pwMessage, setPwMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -82,6 +87,36 @@ export default function ProfilePage() {
   };
 
   const displayName = user?.full_name || user?.username || "";
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwMessage(null);
+    if (newPassword.length < 6) {
+      setPwMessage({ type: "error", text: "Password baru minimal 6 karakter." });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwMessage({ type: "error", text: "Konfirmasi password tidak cocok." });
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPwMessage({ type: "error", text: "Password baru harus berbeda." });
+      return;
+    }
+    setIsChangingPw(true);
+    try {
+      await api.changePassword({ current_password: currentPassword, new_password: newPassword });
+      // Refresh token sudah di-revoke backend: sesi ini tidak bisa diperpanjang,
+      // paksa login ulang dengan password baru.
+      await logout();
+    } catch (err) {
+      setPwMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "Ganti password gagal",
+      });
+      setIsChangingPw(false);
+    }
+  };
 
   return (
     <div>
@@ -167,6 +202,68 @@ export default function ProfilePage() {
             </div>
           )}
         </ComponentCard>
+
+        {user && !showLoading && (
+          <ComponentCard title="Change Password">
+            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+              Password lama wajib benar. Setelah berhasil, semua sesi ikut logout
+              dan kamu harus login ulang dengan password baru.
+            </p>
+            {pwMessage && (
+              <p
+                role={pwMessage.type === "error" ? "alert" : "status"}
+                className={
+                  pwMessage.type === "error"
+                    ? "mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
+                    : "mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400"
+                }
+              >
+                {pwMessage.text}
+              </p>
+            )}
+            <form onSubmit={handleChangePassword} className="space-y-5">
+              <Field>
+                <FieldLabel className="mb-1.5 block">Current Password</FieldLabel>
+                <Input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  autoComplete="current-password"
+                />
+                <FieldError errors={[]} />
+              </Field>
+
+              <Field>
+                <FieldLabel className="mb-1.5 block">New Password (min 6)</FieldLabel>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  autoComplete="new-password"
+                />
+                <FieldError errors={[]} />
+              </Field>
+
+              <Field>
+                <FieldLabel className="mb-1.5 block">Confirm New Password</FieldLabel>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat new password"
+                  autoComplete="new-password"
+                />
+                <FieldError errors={[]} />
+              </Field>
+
+              <Button type="submit" disabled={isChangingPw}>
+                {isChangingPw ? "Updating..." : "Change Password"}
+              </Button>
+            </form>
+          </ComponentCard>
+        )}
       </div>
     </div>
   );
