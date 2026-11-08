@@ -23,6 +23,7 @@ func main() {
 	authH := &handlers.AuthHandler{DB: db, Cfg: cfg}
 	usersH := &handlers.UsersHandler{DB: db}
 	trackH := &handlers.TrackingHandler{DB: db}
+	chatH := &handlers.ChatHandler{DB: db, Cfg: cfg}
 
 	r := gin.Default()
 
@@ -72,6 +73,12 @@ func main() {
 			tracking.POST("/daily-use", trackH.TrackDailyUse)
 			tracking.GET("/stats/daily", middleware.Auth(cfg), middleware.RequireRole("admin"), trackH.DailyStats)
 			tracking.GET("/filter-options", middleware.Auth(cfg), middleware.RequireRole("admin"), trackH.FilterOptions)
+		}
+
+		chat := api.Group("/chat")
+		{
+			// Anonymous AI-chat relay (quota per device, server-held provider key).
+			chat.POST("", chatH.PostChat)
 		}
 	}
 

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +25,15 @@ type Config struct {
 	BootstrapSecret string
 	FrontendURL string
 	CookieSecure bool
+	// AI chat relay (POST /api/chat). Server holds the provider key so the
+	// APK never ships one. Empty GeminiAPIKey = relay disabled (503).
+	GeminiAPIKey   string
+	GeminiModel   string
+	ChatDailyLimit int
+	ChatTimeoutSec int
+	// Optional shared secret: when set, mobile must send X-App-Secret.
+	// Leave empty only in local dev.
+	ChatAppSecret string
 }
 
 func Load() *Config {
@@ -52,7 +63,24 @@ func Load() *Config {
 		BootstrapSecret: get("BOOTSTRAP_SECRET", ""),
 		FrontendURL: get("FRONTEND_URL", "http://localhost:3000"),
 		CookieSecure: get("COOKIE_SECURE", "false") == "true" || os.Getenv("COOKIE_SECURE") == "1",
+		GeminiAPIKey:   get("GEMINI_API_KEY", ""),
+		GeminiModel:     get("GEMINI_MODEL", "gemini-2.0-flash"),
+		ChatDailyLimit:  getInt("CHAT_DAILY_LIMIT", 30),
+		ChatTimeoutSec:  getInt("CHAT_TIMEOUT_SEC", 45),
+		ChatAppSecret:   get("CHAT_APP_SECRET", ""),
 	}
+}
+
+func getInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+		return def
+	}
+	return n
 }
 
 func (c *Config) DSN() string {
