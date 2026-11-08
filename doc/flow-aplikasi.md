@@ -42,7 +42,10 @@ Register publik **dimatikan**. Alurnya diganti dua endpoint khusus:
 
 ### Backend
 
-1. Handler `AuthHandler.Login` mem-bind JSON ke `loginRequest`.
+1. Middleware `LoginRateLimit` (`internal/middleware/ratelimit.go`) berjalan dulu:
+   token bucket per IP — burst 10x, lalu ~10x/menit. Lebih dari itu dijawab
+   `429 too many login attempts` + header `Retry-After: 60` (anti brute-force/DDoS).
+2. Handler `AuthHandler.Login` mem-bind JSON ke `loginRequest`.
 2. Cari user berdasarkan email (`Where("email = ?")`).
 3. Jika `role != "admin"`, kembalikan `403 Forbidden` (customer wajib Google login).
 4. Bandingkan password dengan bcrypt (`utils.CheckPassword`).
@@ -92,6 +95,20 @@ Register publik **dimatikan**. Alurnya diganti dua endpoint khusus:
 2. Handler `UsersHandler.List` mengambil semua user dari DB.
 3. Response `{ users: [...], total }` (password tidak disertakan).
 
+## Rate Limit Login (anti brute-force/DDoS)
+
+File: `internal/middleware/ratelimit.go`, dipasang di `POST /api/auth/login` dan
+`POST /api/auth/bootstrap-admin` (`cmd/server/main.go`).
+
+- Token bucket per IP klien: burst 10x percobaan rapat, lalu ~10x/menit sustained.
+- Melebihi batas → `429 {"error": "too many login attempts, try again later"}` +
+  header `Retry-After: 60`. Form sign-in menampilkan pesan itu otomatis (inline error).
+- IP dibaca via `c.ClientIP()`; `r.SetTrustedProxies(10/8, 172.16/12, 192.168/16)`
+  wajib agar di belakang Caddy yang terbaca IP asli user (dari `X-Forwarded-For`),
+  bukan IP container Caddy — kalau tidak, semua user berbagi 1 bucket dan saling memblokir.
+- Counter in-memory (hilang saat restart, cukup untuk 1 instance). Pengguna sekantor
+  di belakang 1 NAT berbagi kuota — 10 burst + 10/menit masih longgar untuk manusia.
+
 ## Flow Menampilkan & Update Profil
 
 ### Frontend
@@ -107,6 +124,32 @@ Register publik **dimatikan**. Alurnya diganti dua endpoint khusus:
 2. Handler `UsersHandler.UpdateProfile` mencari user berdasarkan `userID`.
 3. Update field yang dikirim (full_name, username, avatar_url).
 4. Simpan ke DB dan response `{ user }`.
+
+## Flow Ganti Password Sendiri
+
+Endpoint: `PATCH /api/users/me/password` (butuh login, semua role yang punya password).
+
+Request:
+
+```json
+{ "current_password": "secret123", "new_password": "secret-baru-123" }
+```
+
+Aturan:
+
+1. `current_password` wajib benar (dicek via bcrypt) → salah = `401 current password is incorrect`.
+2. `new_password` min 6 karakter dan harus beda → selain itu `400`.
+3. Sukses (`200 {"message": "password updated, please login again"}`) sekaligus me-revoke SEMUA refresh token user → logout di semua perangkat/sesi, login ulang pakai password baru. Access JWT yang sedang berjalan tetap valid sampai kedaluwarsa (maks 1 jam).
+4. UI dashboard: halaman `/profile` → card "Change Password" (password lama + baru + konfirmasi, validasi min 6 & cocok). Sukses otomatis logout → redirect `/signin`.
+
+Contoh curl (ganti token admin):
+
+```bash
+curl -X PATCH https://daebak.artetis.my.id/api/users/me/password \
+ -H 'Content-Type: application/json' \
+ -H 'Authorization: Bearer <access_token>' \
+ -d '{"current_password":"secret123","new_password":"secret-baru-123"}'
+```
 
 ## Middleware Autentikasi (Backend)
 

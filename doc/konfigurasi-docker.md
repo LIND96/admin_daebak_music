@@ -38,6 +38,21 @@ tetap tersedia untuk debug.
   yang selalu diizinkan di `backend/cmd/server/main.go`).
 - Data sertifikat tersimpan di volume `caddy_data` / `caddy_config`.
 
+## Dozle (viewer log container)
+
+- Service `dozle` (`amir20/dozzle`) — UI web untuk melihat log realtime semua
+  container (`backend`, `frontend`, `caddy`, `db`) tanpa `docker compose logs` via SSH.
+- Sengaja bind ke `127.0.0.1:9999` di VPS (tidak publik). Akses via SSH tunnel:
+  ```bash
+  ssh -i <key> -L 9999:localhost:9999 ubuntu@<PUBLIC_IP>
+  # buka http://localhost:9999 di browser Mac, login:
+  # user = $DOZZLE_USERNAME (default: admin)
+  ```
+- Auth bawaan via `DOZZLE_USERNAME` / `DOZZLE_PASSWORD` (default password wajib
+  diganti saat deploy produksi, lihat tutorial di bawah).
+- Kalau butuh diakses pakai domain, rutekan lewat Caddy + `basic_auth`
+  (belum dikonfigurasi — minta jika diperlukan).
+
 ## Menghentikan
 
 ```bash

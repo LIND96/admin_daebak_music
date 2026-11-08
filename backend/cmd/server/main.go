@@ -79,6 +79,7 @@ func main() {
 		{
 			// Anonymous AI-chat relay (quota per device, server-held provider key).
 			chat.POST("", chatH.PostChat)
+			chat.GET("/stats/daily", middleware.Auth(cfg), middleware.RequireRole("admin"), chatH.DailyStats)
 		}
 	}
 

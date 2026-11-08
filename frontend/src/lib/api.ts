@@ -75,6 +75,11 @@ export const api = {
   },
   getFilterOptions: (date: string) =>
     request<FilterOptionsResponse>(`/api/tracking/filter-options?date=${encodeURIComponent(date)}`),
+  getChatStats: (params: { date: string; apps_name?: string }) => {
+    const q = new URLSearchParams({ date: params.date });
+    if (params.apps_name) q.set("apps_name", params.apps_name);
+    return request<ChatStatsResponse>(`/api/chat/stats/daily?${q.toString()}`);
+  },
 };
 
 export type FilterOptionCountry = {
@@ -120,4 +125,25 @@ export type DailyStatsResponse = {
   by_app: AppStat[];
   all_apps: string[];
   all_countries: CountryStat[];
+};
+
+export type ChatIdolStat = {
+  idol_name: string;
+  hits: number;
+  unique_devices: number;
+};
+
+export type ChatStatsResponse = {
+  date: string;
+  timezone: string;
+  apps_name: string;
+  total_messages: number;
+  unique_devices: number;
+  ok_count: number;
+  failed_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  hourly: HourlyBucket[];
+  by_app: AppStat[];
+  by_idol: ChatIdolStat[];
 };

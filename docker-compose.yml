@@ -37,7 +37,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:gemini-3.8-flash}
       CHAT_DAILY_LIMIT: ${CHAT_DAILY_LIMIT:-30}
       CHAT_TIMEOUT_SEC: ${CHAT_TIMEOUT_SEC:-45}
       CHAT_APP_SECRET: ${CHAT_APP_SECRET:-}

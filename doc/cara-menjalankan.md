@@ -72,5 +72,6 @@ Frontend akan berjalan di `http://localhost:3000`.
 | GET | `/api/users/:id` | Detail user (admin only) |
 | POST | `/api/users` | Buat user baru (admin only, pengganti register) |
 | PATCH | `/api/users/me` | Update profil sendiri |
+| PATCH | `/api/users/me/password` | Ganti password sendiri (perlu password lama, revoke semua refresh token) |
 
 Autentikasi memakai JWT access pendek + refresh token terpisah (rotasi). Web memakai cookie httpOnly `token` + `refresh_token` (dikirim otomatis via `credentials: "include"`); mobile memakai header `Authorization: Bearer <access_token>`.

@@ -122,12 +122,18 @@ masuk `UNKNOWN`.
 
 ## 3. Statistik Harian (Dashboard Admin)
 
-`GET /api/tracking/stats/daily?date=YYYY-MM-DD&apps_name=` — butuh JWT admin
+`GET /api/tracking/stats/daily?date=YYYY-MM-DD&apps_name=&country_code=` — butuh JWT admin
 (cookie `token` atau `Authorization: Bearer`), `RequireRole("admin")`.
 
 - `date` default hari ini WIB jika kosong. Format wajib `YYYY-MM-DD`.
-- `apps_name` opsional (lowercase). Jika diisi, `hourly`/`by_country`/total
-  difilter 1 app; `by_app` selalu semua app di tanggal itu (untuk perbandingan).
+- `apps_name` opsional, boleh multi: `?apps_name=bts army` atau
+  `?apps_name=bts army,daebak-music` / berulang. Semua panel mengikuti filter ini.
+- `country_code` opsional, boleh multi: `?country_code=ID` atau
+  `?country_code=ID,US` / berulang `?country_code=ID&country_code=US`.
+  Jika diisi, **semua** panel (`hourly`, total/`dau`, `by_country`, `by_app`)
+  difilter ke negara-negara itu —
+  cocok untuk grafik "Total hits per jam" per negara. Cocokkan dengan
+  `country_code` (fallback ke `country` upper untuk data lama).
 
 Response `200`:
 
@@ -136,6 +142,7 @@ Response `200`:
   "date": "2026-11-03",
   "timezone": "Asia/Jakarta",
   "apps_name": "bts army",
+  "country_code": "UA",
   "total_hits": 8,
   "dau": 3,
   "hourly": [{ "hour": 0, "hits": 0, "unique_devices": 0 }, "...24 item"],
@@ -149,16 +156,24 @@ Query (semua `Raw SQL`, `WHERE usage_date = ?`):
 - hourly: `EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'Asia/Jakarta')`,
   `GROUP BY 1` → 24 bucket (jam kosong = 0).
 - total/`dau`: `COUNT(*)` + `COUNT(DISTINCT device_id)`.
-- `by_country`: `COALESCE(NULLIF(UPPER(country),''),'UNKNOWN')`, top 10.
+- `by_country`: group by `country_code` (fallback `UPPER(country)`), semua negara (LIMIT 250) — peta render semua, list bawah slice top 5 di frontend.
 - `by_app`: `GROUP BY apps_name`, top 20.
+- `all_apps` / `all_countries`: daftar opsi pill modal — scope tanggal saja
+  (abaikan filter aktif) agar daftar selalu sesuai tanggal dan tidak collapse.
+- `GET /api/tracking/filter-options?date=` (admin only): endpoint ringan khusus
+  pill modal — return `{apps: [...], countries: [{country, country_code}]}` untuk
+  tanggal itu. Dipakai modal setiap tanggal draft berubah (debounce).
 
 ## 4. Dashboard (`/dashboard`)
 
 Komponen: `frontend/src/components/main/dashboard/tracking/`.
 
-- `tracking-section.tsx` — filter tanggal (default hari ini WIB via
-  `Intl.DateTimeFormat` + `timeZone: Asia/Jakarta`, tombol ←/→, input date)
-  + filter `apps_name` + 3 kartu (DAU unik `device_id`, total hits, rata-rata hit/device).
+- `tracking-section.tsx` — tombol **Filter** (badge jumlah filter aktif) membuka
+  modal berisi Tanggal (date + ←/→), **Apps name** (pill multi-select dari
+  `by_app`), dan **Country** (search by name + pill bendera + nama,
+  multi-select dari `by_country`), footer Reset/Terapkan. Pill mengikuti
+  tanggal draft secara live via `GET /api/tracking/filter-options` (debounce);
+  pilihan yang dicentang tidak hilang saat daftar refresh.
 - `hourly-chart.tsx` — bar 24 jam (`00–23` WIB), series user unik + hits.
 - `countries-chart.tsx` — gaya Customers Demographic: peta dunia (jsvectormap
   reuse `demographic-card/country-map`) + list 5 teratas (nama, user unik · hits, %).

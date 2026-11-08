@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -283,8 +284,120 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	_ = h.DB.Create(&row).Error // logging must not fail the reply
 
 	if err != nil {
+		// Log status/error saja (tanpa key, tanpa isi pesan user) agar
+		// diagnosis 502 tidak buta seperti sebelumnya.
+		log.Printf("[chat] provider failed model=%s err=%v", h.Cfg.GeminiModel, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reply": reply})
+}
+
+type chatIdolStat struct {
+	IdolName      string `json:"idol_name"`
+	Hits          int    `json:"hits"`
+	UniqueDevices int    `json:"unique_devices"`
+}
+
+// DailyStats returns chat relay usage for a date (YYYY-MM-DD, Asia/Jakarta):
+// total messages, unique devices, ok/failed split, token sums, 24 hourly
+// buckets, per-app and per-idol breakdowns. Admin only (route-guarded).
+func (h *ChatHandler) DailyStats(c *gin.Context) {
+	dateStr := strings.TrimSpace(c.Query("date"))
+	appsName := strings.ToLower(strings.TrimSpace(c.Query("apps_name")))
+
+	if dateStr == "" {
+		dateStr = jakartaNow().Format("2006-01-02")
+	}
+	if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYY-MM-DD"})
+		return
+	}
+
+	base := `FROM chat_messages WHERE usage_date = ?`
+	args := []any{dateStr}
+	if appsName != "" {
+		base += ` AND apps_name = ?`
+		args = append(args, appsName)
+	}
+
+	type totalRow struct {
+		Hits        int
+		DAU         int
+		OkCount     int
+		FailedCount int
+		TokensIn    int
+		TokensOut   int
+	}
+	var totals totalRow
+	totalSQL := `SELECT COUNT(*) AS hits, COUNT(DISTINCT device_id) AS dau,
+		COUNT(*) FILTER (WHERE ok) AS ok_count,
+		COUNT(*) FILTER (WHERE NOT ok) AS failed_count,
+		COALESCE(SUM(tokens_in), 0) AS tokens_in,
+		COALESCE(SUM(tokens_out), 0) AS tokens_out ` + base
+	if err := h.DB.Raw(totalSQL, args...).Scan(&totals).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch totals"})
+		return
+	}
+
+	type hourRow struct {
+		Hour          int
+		Hits          int
+		UniqueDevices int
+	}
+	var hourRows []hourRow
+	hourSQL := `SELECT EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'Asia/Jakarta')::int AS hour,
+		COUNT(*) AS hits, COUNT(DISTINCT device_id) AS unique_devices ` +
+		base + ` GROUP BY 1 ORDER BY 1`
+	if err := h.DB.Raw(hourSQL, args...).Scan(&hourRows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch hourly"})
+		return
+	}
+	byHour := make(map[int]hourRow, len(hourRows))
+	for _, r := range hourRows {
+		byHour[r.Hour] = r
+	}
+	hourly := make([]hourlyBucket, 0, 24)
+	for hr := 0; hr < 24; hr++ {
+		r := byHour[hr]
+		hourly = append(hourly, hourlyBucket{Hour: hr, Hits: r.Hits, UniqueDevices: r.UniqueDevices})
+	}
+
+	var byApp []appStat
+	appSQL := `SELECT apps_name AS apps_name, COUNT(*) AS hits,
+		COUNT(DISTINCT device_id) AS unique_devices ` + base + ` GROUP BY 1 ORDER BY hits DESC LIMIT 20`
+	if err := h.DB.Raw(appSQL, args...).Scan(&byApp).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch apps"})
+		return
+	}
+	if byApp == nil {
+		byApp = []appStat{}
+	}
+
+	var byIdol []chatIdolStat
+	idolSQL := `SELECT COALESCE(NULLIF(idol_name, ''), '(unknown)') AS idol_name, COUNT(*) AS hits,
+		COUNT(DISTINCT device_id) AS unique_devices ` + base + `
+		GROUP BY 1 ORDER BY hits DESC LIMIT 20`
+	if err := h.DB.Raw(idolSQL, args...).Scan(&byIdol).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch idols"})
+		return
+	}
+	if byIdol == nil {
+		byIdol = []chatIdolStat{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"date":           dateStr,
+		"timezone":       "Asia/Jakarta",
+		"apps_name":      appsName,
+		"total_messages": totals.Hits,
+		"unique_devices": totals.DAU,
+		"ok_count":       totals.OkCount,
+		"failed_count":   totals.FailedCount,
+		"tokens_in":      totals.TokensIn,
+		"tokens_out":     totals.TokensOut,
+		"hourly":         hourly,
+		"by_app":         byApp,
+		"by_idol":        byIdol,
+	})
 }
