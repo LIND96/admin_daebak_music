@@ -291,7 +291,7 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"reply": reply})
+	c.JSON(http.StatusOK, gin.H{"reply": reply, "provider": "openai-compat:" + model, "model": model})
 }
 
 type chatIdolStat struct {
