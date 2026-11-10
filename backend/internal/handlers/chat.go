@@ -111,6 +111,7 @@ func toChatCompletionBody(model string, msgs []chatIncomingMessage) chatCompleti
 }
 
 type chatCompletionResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Content any `json:"content"`
@@ -158,24 +159,24 @@ func (h *ChatHandler) checkAppSecret(c *gin.Context) bool {
 // callProvider sends one chat completion through the configured OpenAI-
 // compatible endpoint (9Router /v1/chat/completions or Gemini's own OpenAI
 // endpoint). apiKey travels only in the Authorization header, never in logs.
-func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model string, body chatCompletionRequest) (string, int, int, error) {
+func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model string, body chatCompletionRequest) (text string, tIn, tOut int, servedModel string, err error) {
 	url := baseURL + "/chat/completions"
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, "", err
 	}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return "", 0, 0, ctx.Err()
+				return "", 0, 0, "", ctx.Err()
 			case <-time.After(1500 * time.Millisecond):
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
-			return "", 0, 0, err
+			return "", 0, 0, "", err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -191,35 +192,41 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 			continue
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return "", 0, 0, fmt.Errorf("provider rate limited (429)")
+			return "", 0, 0, "", fmt.Errorf("provider rate limited (429)")
 		}
 		if resp.StatusCode != http.StatusOK {
-			return "", 0, 0, fmt.Errorf("provider status %d", resp.StatusCode)
+			return "", 0, 0, "", fmt.Errorf("provider status %d", resp.StatusCode)
 		}
 		var out chatCompletionResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return "", 0, 0, err
+			return "", 0, 0, "", err
 		}
 		if out.Error != nil {
-			return "", 0, 0, fmt.Errorf("provider error: %s", out.Error.Message)
+			return "", 0, 0, "", fmt.Errorf("provider error: %s", out.Error.Message)
 		}
 		text := ""
 		if len(out.Choices) > 0 {
 			text = replyTextOf(out.Choices[0].Message.Content)
 		}
 		if text == "" {
-			return "", 0, 0, fmt.Errorf("empty provider reply")
+			return "", 0, 0, "", fmt.Errorf("empty provider reply")
 		}
 		tIn, tOut := 0, 0
 		if out.Usage != nil {
 			tIn, tOut = out.Usage.PromptTokens, out.Usage.CompletionTokens
 		}
-		return text, tIn, tOut, nil
+		// Nama model yang benar-benar menjawab (bisa beda dari yang diminta
+		// bila gateway failover, mis. 9Router → OpenCode Free).
+		served := strings.TrimSpace(out.Model)
+		if served == "" {
+			served = model
+		}
+		return text, tIn, tOut, served, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("provider unavailable")
 	}
-	return "", 0, 0, lastErr
+	return "", 0, 0, "", lastErr
 }
 
 // PostChat relays one chat message through the server-held provider key.
@@ -269,13 +276,16 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(h.Cfg.ChatTimeoutSec)*time.Second)
 	defer cancel()
 	model := h.Cfg.ProviderModel()
-	reply, tIn, tOut, err := h.callProvider(ctx, h.Cfg.ProviderBaseURL(), h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
+	reply, tIn, tOut, served, err := h.callProvider(ctx, h.Cfg.ProviderBaseURL(), h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
+	if served == "" {
+		served = model // gagal sebelum respons terbaca — catat yang diminta
+	}
 
 	row := models.ChatMessage{
 		DeviceID:   deviceID,
 		AppsName:   appsName,
 		IdolName:   idolName,
-		Provider:   "openai-compat:" + h.Cfg.ProviderModel(),
+		Provider:   "openai-compat:" + served,
 		TokensIn:   tIn,
 		TokensOut:  tOut,
 		Ok:         err == nil,
@@ -287,11 +297,11 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if err != nil {
 		// Log status/error saja (tanpa key, tanpa isi pesan user) agar
 		// diagnosis 502 tidak buta seperti sebelumnya.
-		log.Printf("[chat] provider failed model=%s err=%v", h.Cfg.ProviderModel(), err)
+		log.Printf("[chat] provider failed model=%s err=%v", served, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"reply": reply, "provider": "openai-compat:" + model, "model": model})
+	c.JSON(http.StatusOK, gin.H{"reply": reply, "provider": "openai-compat:" + served, "model": served})
 }
 
 type chatIdolStat struct {

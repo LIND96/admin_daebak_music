@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -67,5 +70,31 @@ func TestSecondsUntilMidnight(t *testing.T) {
 	}
 	if got := secondsUntilMidnight(time.Date(2026, 11, 8, 0, 0, 0, 0, loc)); got != 86400 {
 		t.Fatalf("got %d, want 86400", got)
+	}
+}
+
+func TestCallProviderReturnsServedModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"free-model-x","choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`))
+	}))
+	defer srv.Close()
+	h := &ChatHandler{}
+	text, tIn, tOut, served, err := h.callProvider(context.Background(), srv.URL, "k", "requested-model",
+		toChatCompletionBody("requested-model", []chatIncomingMessage{{Role: "user", Content: "hi"}}))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if text != "hi" || tIn != 5 || tOut != 2 {
+		t.Fatalf("got %q %d %d", text, tIn, tOut)
+	}
+	if served != "free-model-x" {
+		t.Fatalf("served = %q, want upstream model", served)
 	}
 }
