@@ -66,6 +66,9 @@ services:
       PORT: 20128
       REQUIRE_API_KEY: "true"
       API_KEY_SECRET: ${NINE_ROUTER_API_SECRET:-change-me-9router-secret}
+    ports:
+      # Localhost VPS saja (pola Dozle): UI dibuka via SSH tunnel, bukan publik.
+      - "127.0.0.1:20128:20128"
     volumes:
       - nine-router-data:/app/data
     restart: unless-stopped
