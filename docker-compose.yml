@@ -37,10 +37,15 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:gemini-3.8-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
       CHAT_DAILY_LIMIT: ${CHAT_DAILY_LIMIT:-30}
       CHAT_TIMEOUT_SEC: ${CHAT_TIMEOUT_SEC:-45}
       CHAT_APP_SECRET: ${CHAT_APP_SECRET:-}
+      # Relay AI via 9Router (opsional): isi ketiganya untuk lewat gateway
+      # (failover multi-provider di UI 9Router), kosongkan = langsung Gemini.
+      CHAT_PROVIDER_BASE_URL: ${CHAT_PROVIDER_BASE_URL:-}
+      CHAT_PROVIDER_API_KEY: ${CHAT_PROVIDER_API_KEY:-}
+      CHAT_PROVIDER_MODEL: ${CHAT_PROVIDER_MODEL:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -48,6 +53,22 @@ services:
         condition: service_healthy
     command: >
       sh -c "cd /app && /server"
+
+  # AI gateway (OpenAI-compatible /v1/*) untuk relay chat. Internal only:
+  # tanpa ports = tidak bisa dijangkau publik, hanya service compose
+  # (backend → http://nine-router:20128). API key /v1 dibuat di UI
+  # (http://localhost:20128 via SSH tunnel) lalu dimasukkan ke
+  # CHAT_PROVIDER_* di atas. Komentari seluruh blok ini bila belum dipakai.
+  nine-router:
+    image: decolua/9router:latest
+    environment:
+      DATA_DIR: /app/data
+      PORT: 20128
+      REQUIRE_API_KEY: "true"
+      API_KEY_SECRET: ${NINE_ROUTER_API_SECRET:-change-me-9router-secret}
+    volumes:
+      - nine-router-data:/app/data
+    restart: unless-stopped
 
   frontend:
     build:
@@ -95,5 +116,6 @@ services:
 
 volumes:
   pgdata:
+  nine-router-data:
   caddy_data:
   caddy_config:

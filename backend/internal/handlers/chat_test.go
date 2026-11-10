@@ -41,17 +41,20 @@ func TestValidateChatRequest(t *testing.T) {
 	}
 }
 
-func TestToGeminiBody(t *testing.T) {
-	body := toGeminiBody([]chatIncomingMessage{
+func TestToChatCompletionBody(t *testing.T) {
+	body := toChatCompletionBody("m", []chatIncomingMessage{
 		{Role: "system", Content: "be nice"},
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "hello"},
 	})
-	if body.SystemInstruction == nil || body.SystemInstruction.Parts[0].Text != "be nice" {
-		t.Fatal("system message must become system_instruction")
+	if body.Model != "m" {
+		t.Fatal("model must pass through")
 	}
-	if len(body.Contents) != 2 || body.Contents[0].Role != "user" || body.Contents[1].Role != "model" {
-		t.Fatalf("role mapping wrong: %+v", body.Contents)
+	if len(body.Messages) != 3 || body.Messages[0].Role != "system" || body.Messages[2].Role != "assistant" {
+		t.Fatalf("roles must pass through: %+v", body.Messages)
+	}
+	if body.MaxTokens <= 0 {
+		t.Fatal("max tokens must be set")
 	}
 }
 

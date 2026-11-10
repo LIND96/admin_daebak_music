@@ -81,57 +81,54 @@ func validateChatRequest(req chatRelayRequest) error {
 	return nil
 }
 
-type geminiPart struct {
-	Text string `json:"text"`
+type chatCompletionMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
-type geminiContent struct {
-	Role  string       `json:"role,omitempty"`
-	Parts []geminiPart `json:"parts"`
+type chatCompletionRequest struct {
+	Model       string                  `json:"model"`
+	Messages    []chatCompletionMessage `json:"messages"`
+	Temperature float64                 `json:"temperature,omitempty"`
+	MaxTokens   int                     `json:"max_tokens,omitempty"`
 }
 
-type geminiRequest struct {
-	SystemInstruction *geminiContent  `json:"system_instruction,omitempty"`
-	Contents          []geminiContent `json:"contents"`
-	GenerationConfig  map[string]any  `json:"generationConfig,omitempty"`
-}
-
-// toGeminiBody maps OpenAI-style roles onto Gemini roles. First system
-// message becomes system_instruction; the rest map user->user,
-// assistant->model. Pure (unit-tested).
-func toGeminiBody(msgs []chatIncomingMessage) geminiRequest {
-	body := geminiRequest{Contents: []geminiContent{}}
+// toChatCompletionBody maps validated messages onto the OpenAI-compatible
+// shape served by 9Router (/v1/chat/completions) and by Gemini's own
+// OpenAI endpoint. Roles pass through (system/user/assistant). Pure
+// (unit-tested).
+func toChatCompletionBody(model string, msgs []chatIncomingMessage) chatCompletionRequest {
+	out := make([]chatCompletionMessage, 0, len(msgs))
 	for _, m := range msgs {
-		text := strings.TrimSpace(m.Content)
-		if m.Role == "system" && body.SystemInstruction == nil {
-			body.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: text}}}
-			continue
-		}
-		role := "user"
-		if m.Role == "assistant" {
-			role = "model"
-		}
-		body.Contents = append(body.Contents, geminiContent{Role: role, Parts: []geminiPart{{Text: text}}})
+		out = append(out, chatCompletionMessage{Role: m.Role, Content: strings.TrimSpace(m.Content)})
 	}
-	body.GenerationConfig = map[string]any{"maxOutputTokens": maxReplyTokens, "temperature": 0.9}
-	return body
+	return chatCompletionRequest{
+		Model:       model,
+		Messages:    out,
+		Temperature: 0.9,
+		MaxTokens:   maxReplyTokens,
+	}
 }
 
-type geminiResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
-	UsageMetadata *struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-	} `json:"usageMetadata"`
+type chatCompletionResponse struct {
+	Choices []struct {
+		Message struct {
+			Content any `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// replyTextOf tolerates string content; array-part content is out of scope.
+func replyTextOf(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
 }
 
 // secondsUntilMidnight returns seconds from now to next Jakarta midnight.
@@ -158,9 +155,11 @@ func (h *ChatHandler) checkAppSecret(c *gin.Context) bool {
 	return true
 }
 
-func (h *ChatHandler) callGemini(ctx context.Context, body geminiRequest) (string, int, int, error) {
-	url := "https://generativelanguage.googleapis.com/v1beta/models/" +
-		h.Cfg.GeminiModel + ":generateContent?key=" + h.Cfg.GeminiAPIKey
+// callProvider sends one chat completion through the configured OpenAI-
+// compatible endpoint (9Router /v1/chat/completions or Gemini's own OpenAI
+// endpoint). apiKey travels only in the Authorization header, never in logs.
+func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model string, body chatCompletionRequest) (string, int, int, error) {
+	url := baseURL + "/chat/completions"
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return "", 0, 0, err
@@ -179,6 +178,7 @@ func (h *ChatHandler) callGemini(ctx context.Context, body geminiRequest) (strin
 			return "", 0, 0, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			lastErr = err
@@ -190,29 +190,29 @@ func (h *ChatHandler) callGemini(ctx context.Context, body geminiRequest) (strin
 			lastErr = fmt.Errorf("provider status %d", resp.StatusCode)
 			continue
 		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return "", 0, 0, fmt.Errorf("provider rate limited (429)")
+		}
 		if resp.StatusCode != http.StatusOK {
 			return "", 0, 0, fmt.Errorf("provider status %d", resp.StatusCode)
 		}
-		var out geminiResponse
+		var out chatCompletionResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return "", 0, 0, err
 		}
 		if out.Error != nil {
 			return "", 0, 0, fmt.Errorf("provider error: %s", out.Error.Message)
 		}
-		var sb strings.Builder
-		for _, cand := range out.Candidates {
-			for _, p := range cand.Content.Parts {
-				sb.WriteString(p.Text)
-			}
+		text := ""
+		if len(out.Choices) > 0 {
+			text = replyTextOf(out.Choices[0].Message.Content)
 		}
-		text := strings.TrimSpace(sb.String())
 		if text == "" {
 			return "", 0, 0, fmt.Errorf("empty provider reply")
 		}
 		tIn, tOut := 0, 0
-		if out.UsageMetadata != nil {
-			tIn, tOut = out.UsageMetadata.PromptTokenCount, out.UsageMetadata.CandidatesTokenCount
+		if out.Usage != nil {
+			tIn, tOut = out.Usage.PromptTokens, out.Usage.CompletionTokens
 		}
 		return text, tIn, tOut, nil
 	}
@@ -225,7 +225,7 @@ func (h *ChatHandler) callGemini(ctx context.Context, body geminiRequest) (strin
 // PostChat relays one chat message through the server-held provider key.
 // Quota: CHAT_DAILY_LIMIT successes+failures per (device_id, apps_name, day).
 func (h *ChatHandler) PostChat(c *gin.Context) {
-	if h.Cfg.GeminiAPIKey == "" {
+	if h.Cfg.ProviderAPIKey() == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat relay disabled"})
 		return
 	}
@@ -268,13 +268,14 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(h.Cfg.ChatTimeoutSec)*time.Second)
 	defer cancel()
-	reply, tIn, tOut, err := h.callGemini(ctx, toGeminiBody(req.Messages))
+	model := h.Cfg.ProviderModel()
+	reply, tIn, tOut, err := h.callProvider(ctx, h.Cfg.ProviderBaseURL(), h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
 
 	row := models.ChatMessage{
 		DeviceID:   deviceID,
 		AppsName:   appsName,
 		IdolName:   idolName,
-		Provider:   "gemini:" + h.Cfg.GeminiModel,
+		Provider:   "openai-compat:" + h.Cfg.ProviderModel(),
 		TokensIn:   tIn,
 		TokensOut:  tOut,
 		Ok:         err == nil,
@@ -286,7 +287,7 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if err != nil {
 		// Log status/error saja (tanpa key, tanpa isi pesan user) agar
 		// diagnosis 502 tidak buta seperti sebelumnya.
-		log.Printf("[chat] provider failed model=%s err=%v", h.Cfg.GeminiModel, err)
+		log.Printf("[chat] provider failed model=%s err=%v", h.Cfg.ProviderModel(), err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
