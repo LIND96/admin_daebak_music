@@ -397,6 +397,23 @@ func (h *ChatHandler) DailyStats(c *gin.Context) {
 		byIdol = []chatIdolStat{}
 	}
 
+	type providerStat struct {
+		Provider      string `json:"provider"`
+		Hits          int    `json:"hits"`
+		UniqueDevices int    `json:"unique_devices"`
+	}
+	var byProvider []providerStat
+	providerSQL := `SELECT COALESCE(NULLIF(provider, ''), '(unknown)') AS provider, COUNT(*) AS hits,
+		COUNT(DISTINCT device_id) AS unique_devices ` + base + `
+		GROUP BY 1 ORDER BY hits DESC`
+	if err := h.DB.Raw(providerSQL, args...).Scan(&byProvider).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch providers"})
+		return
+	}
+	if byProvider == nil {
+		byProvider = []providerStat{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"date":           dateStr,
 		"timezone":       "Asia/Jakarta",
@@ -410,5 +427,6 @@ func (h *ChatHandler) DailyStats(c *gin.Context) {
 		"hourly":         hourly,
 		"by_app":         byApp,
 		"by_idol":        byIdol,
+		"by_provider":    byProvider,
 	})
 }

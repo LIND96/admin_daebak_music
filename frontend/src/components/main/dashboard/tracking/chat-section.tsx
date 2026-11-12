@@ -183,7 +183,38 @@ export default function ChatSection() {
         <div className="col-span-12">
           <HourlyChart hourly={data?.hourly ?? emptyHourly} scopeNote={appliedApp || undefined} />
         </div>
-        <div className="col-span-12 lg:col-span-6">
+        <div className="col-span-12 lg:col-span-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-6 dark:border-gray-800 dark:bg-white/3">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
+              Provider terpopuler
+            </h3>
+            {(data?.by_provider ?? []).length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Belum ada data.</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+                {data!.by_provider.map((p, i) => {
+                  const share = total > 0 ? Math.round((p.hits / total) * 100) : 0;
+                  return (
+                    <li key={p.provider} className="flex items-center justify-between gap-2 py-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2 text-gray-700 dark:text-gray-200">
+                        {i === 0 && (
+                          <span className="shrink-0 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                            #1
+                          </span>
+                        )}
+                        <span className="truncate">{p.provider}</span>
+                      </span>
+                      <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                        {p.hits.toLocaleString("id-ID")} ({share}%)
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+        <div className="col-span-12 lg:col-span-4">
           <div className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-6 dark:border-gray-800 dark:bg-white/3">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
               Per aplikasi

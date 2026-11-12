@@ -133,6 +133,12 @@ export type ChatIdolStat = {
   unique_devices: number;
 };
 
+export type ChatProviderStat = {
+  provider: string;
+  hits: number;
+  unique_devices: number;
+};
+
 export type ChatStatsResponse = {
   date: string;
   timezone: string;
@@ -146,4 +152,5 @@ export type ChatStatsResponse = {
   hourly: HourlyBucket[];
   by_app: AppStat[];
   by_idol: ChatIdolStat[];
+  by_provider: ChatProviderStat[];
 };
