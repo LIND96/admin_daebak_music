@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"admin_daebak_music/backend/internal/config"
 )
 
 func TestValidateChatRequest(t *testing.T) {
@@ -61,18 +63,6 @@ func TestToChatCompletionBody(t *testing.T) {
 	}
 }
 
-func TestSecondsUntilMidnight(t *testing.T) {
-	loc := jakartaLoc
-	// 23:00 WIB -> 3600s to midnight.
-	n := time.Date(2026, 11, 8, 23, 0, 0, 0, loc)
-	if got := secondsUntilMidnight(n); got != 3600 {
-		t.Fatalf("got %d, want 3600", got)
-	}
-	if got := secondsUntilMidnight(time.Date(2026, 11, 8, 0, 0, 0, 0, loc)); got != 86400 {
-		t.Fatalf("got %d, want 86400", got)
-	}
-}
-
 func TestCallProviderReturnsServedModel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -96,5 +86,69 @@ func TestCallProviderReturnsServedModel(t *testing.T) {
 	}
 	if served != "free-model-x" {
 		t.Fatalf("served = %q, want upstream model", served)
+	}
+}
+
+func TestIsDirectGeminiURL(t *testing.T) {
+	if !isDirectGeminiURL("https://generativelanguage.googleapis.com/v1beta/openai") {
+		t.Fatal("Gemini endpoint must be blocked")
+	}
+	if isDirectGeminiURL("http://nine-router:20128/v1") {
+		t.Fatal("9Router must not be blocked")
+	}
+}
+
+func TestPickModelRoundRobin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"b"},{"id":"a"},{"id":"b"},{"id":"  "},{"id":"c"}]}`))
+	}))
+	defer srv.Close()
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
+	var got []string
+	for i := 0; i < 4; i++ {
+		m, err := h.pickModel(context.Background())
+		if err != nil {
+			t.Fatalf("pick %d err = %v", i, err)
+		}
+		got = append(got, m)
+	}
+	// Urutan dipertahankan, duplikat/kosong dibuang: [b a c], lalu wrap.
+	want := []string{"b", "a", "c", "b"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("pick %d = %q, want %q (all=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestPickModelUsesStaleCacheOnFetchFailure(t *testing.T) {
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: "http://127.0.0.1:1", ChatProviderAPIKey: "k"}}
+	h.cachedModels = []string{"stale-model"}
+	h.modelsFetchedAt = time.Now().Add(-time.Hour) // kadaluarsa -> fetch gagal -> pakai basi
+	m, err := h.pickModel(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if m != "stale-model" {
+		t.Fatalf("m = %q, want stale cache", m)
+	}
+}
+
+func TestPickModelEmptyList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer srv.Close()
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
+	if _, err := h.pickModel(context.Background()); err == nil {
+		t.Fatal("empty model list must error")
 	}
 }

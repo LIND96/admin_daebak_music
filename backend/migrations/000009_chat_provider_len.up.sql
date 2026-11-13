@@ -1,0 +1,1 @@
+ALTER TABLE chat_messages ALTER COLUMN provider TYPE VARCHAR(128);

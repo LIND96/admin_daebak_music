@@ -25,17 +25,15 @@ type Config struct {
 	BootstrapSecret       string
 	FrontendURL           string
 	CookieSecure          bool
-	// AI chat relay (POST /api/chat). Server holds the provider key so the
-	// APK never ships one. Empty GeminiAPIKey = relay disabled (503).
-	GeminiAPIKey string
-	GeminiModel  string
-	// Relay provider umum (OpenAI-compatible). Kosong = fallback ke Gemini
-	// di atas, sehingga deploy lama jalan tanpa perubahan env. Isi ketiganya
-	// untuk lewat 9Router, mis. BASE=http://nine-router:20128/v1.
+	// AI chat relay (POST /api/chat) — HANYA via 9Router (OpenAI-compatible
+	// /v1/chat/completions). Server holds the provider key so the APK never
+	// ships one. Empty ChatProviderAPIKey = relay disabled (503).
+	// Tidak ada fallback langsung ke Gemini: semua chat wajib lewat gateway.
+	// Model TIDAK di-pin di backend: daftar model diambil otomatis dari
+	// 9Router (GET /v1/models) lalu dipilih round-robin per request, sehingga
+	// seluruh model/provider yang tersedia di 9Router ikut terpakai.
 	ChatProviderBaseURL string
 	ChatProviderAPIKey  string
-	ChatProviderModel   string
-	ChatDailyLimit      int
 	ChatTimeoutSec      int
 	// Optional shared secret: when set, mobile must send X-App-Secret.
 	// Leave empty only in local dev.
@@ -69,12 +67,8 @@ func Load() *Config {
 		BootstrapSecret:       get("BOOTSTRAP_SECRET", ""),
 		FrontendURL:           get("FRONTEND_URL", "http://localhost:3000"),
 		CookieSecure:          get("COOKIE_SECURE", "false") == "true" || os.Getenv("COOKIE_SECURE") == "1",
-		GeminiAPIKey:          get("GEMINI_API_KEY", ""),
-		GeminiModel:           get("GEMINI_MODEL", "gemini-2.0-flash"),
 		ChatProviderBaseURL:   get("CHAT_PROVIDER_BASE_URL", ""),
 		ChatProviderAPIKey:    get("CHAT_PROVIDER_API_KEY", ""),
-		ChatProviderModel:     get("CHAT_PROVIDER_MODEL", ""),
-		ChatDailyLimit:        getInt("CHAT_DAILY_LIMIT", 30),
 		ChatTimeoutSec:        getInt("CHAT_TIMEOUT_SEC", 45),
 		ChatAppSecret:         get("CHAT_APP_SECRET", ""),
 	}
@@ -97,13 +91,13 @@ func (c *Config) DSN() string {
 		" password=" + c.DBPassword + " dbname=" + c.DBName + " sslmode=" + c.DBSSLMode
 }
 
-// DefaultProviderBaseURL adalah endpoint OpenAI-compatible milik Gemini —
-// tanpa setting CHAT_PROVIDER_* pun relay bicara protokol yang sama dengan
-// 9Router, sehingga pindah gateway = ganti env tanpa ubah kode.
-const DefaultProviderBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+// DefaultProviderBaseURL adalah gateway 9Router internal (compose service
+// nine-router). Semua chat relay wajib lewat sini; tidak ada jalur langsung
+// ke provider (mis. Gemini) dari backend.
+const DefaultProviderBaseURL = "http://nine-router:20128/v1"
 
 // ProviderBaseURL adalah base URL OpenAI-compatible tujuan relay
-// (9Router: http://nine-router:20128/v1, tanpa trailing slash).
+// (default: 9Router internal, tanpa trailing slash).
 func (c *Config) ProviderBaseURL() string {
 	if v := strings.TrimSpace(c.ChatProviderBaseURL); v != "" {
 		return strings.TrimRight(v, "/")
@@ -111,19 +105,14 @@ func (c *Config) ProviderBaseURL() string {
 	return DefaultProviderBaseURL
 }
 
-// ProviderAPIKey jatuh ke GEMINI_API_KEY bila CHAT_PROVIDER_API_KEY kosong,
-// agar deploy lama jalan tanpa perubahan env.
+// ProviderAPIKey adalah key /v1 milik 9Router (dibuat di UI 9Router).
 func (c *Config) ProviderAPIKey() string {
-	if v := strings.TrimSpace(c.ChatProviderAPIKey); v != "" {
-		return v
-	}
-	return strings.TrimSpace(c.GeminiAPIKey)
+	return strings.TrimSpace(c.ChatProviderAPIKey)
 }
 
-// ProviderModel jatuh ke GEMINI_MODEL bila CHAT_PROVIDER_MODEL kosong.
-func (c *Config) ProviderModel() string {
-	if v := strings.TrimSpace(c.ChatProviderModel); v != "" {
-		return v
-	}
-	return strings.TrimSpace(c.GeminiModel)
+// ChatRelayReady true bila relay bisa jalan: key 9Router terisi.
+// Base URL selalu ada (default ke 9Router internal di atas); daftar model
+// diambil otomatis dari 9Router, bukan dari env.
+func (c *Config) ChatRelayReady() bool {
+	return c.ProviderAPIKey() != ""
 }

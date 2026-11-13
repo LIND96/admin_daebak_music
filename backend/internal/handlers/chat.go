@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"admin_daebak_music/backend/internal/config"
@@ -19,17 +21,109 @@ import (
 	"gorm.io/gorm"
 )
 
-// Chat relay: mobile POSTs here instead of calling a free AI endpoint
-// directly, so per-IP lottery limits can't starve users. The server holds
-// the provider key (never shipped in the APK) and enforces a fair daily
-// quota per device_id. Contract mirrors the mobile ChatResult shape:
-// success -> {"reply"}, quota -> 429 + retry_after_seconds, provider
-// failure -> 502. Mobile falls back to direct free access on 502/network
-// errors, but treats 429 as final (quota is quota).
+// Chat relay: mobile POSTs here. Server memegang key 9Router (tidak pernah
+// dikirim di APK). SEMUA chat wajib lewat 9Router (OpenAI-compatible
+// /v1/chat/completions) — tidak ada jalur langsung ke Gemini. Limit harian
+// diatur di mobile apps, bukan backend. Backend TIDAK mem-pin satu model:
+// daftar model chat diambil otomatis dari 9Router (GET /v1/models, di-cache
+// singkat) lalu dipilih round-robin per request, sehingga seluruh
+// model/provider yang tersedia di 9Router ikut terpakai. Contract:
+// success -> {"reply","provider","model","requested_model"},
+// provider failure -> 502.
 
 type ChatHandler struct {
 	DB  *gorm.DB
 	Cfg *config.Config
+
+	// Cache daftar model 9Router + counter round-robin. Diakses dari
+	// banyak goroutine (satu per request) sehingga butuh mutex/atomic.
+	modelsMu        sync.Mutex
+	cachedModels    []string
+	modelsFetchedAt time.Time
+	rrCounter       atomic.Uint64
+}
+
+// nineRouterModelsTTL: berapa lama daftar model 9Router di-cache sebelum
+// diambil ulang. Singkat agar model/provider baru di UI 9Router cepat
+// ikut terpakai, tapi tidak membebani tiap request dengan GET /v1/models.
+const nineRouterModelsTTL = 5 * time.Minute
+
+type nineRouterModelEntry struct {
+	ID string `json:"id"`
+}
+
+type nineRouterModelList struct {
+	Data []nineRouterModelEntry `json:"data"`
+}
+
+// fetchModels mengambil daftar id model chat dari 9Router (GET /v1/models
+// = endpoint daftar model chat/LLM; combo ikut muncul sebagai id biasa).
+func (h *ChatHandler) fetchModels(ctx context.Context) ([]string, error) {
+	url := strings.TrimRight(h.Cfg.ProviderBaseURL(), "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.Cfg.ProviderAPIKey())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("models status %d", resp.StatusCode)
+	}
+	var out nineRouterModelList
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, m := range out.Data {
+		id := strings.TrimSpace(m.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("empty model list from 9Router")
+	}
+	return ids, nil
+}
+
+// pickModel memilih satu model dari daftar 9Router secara round-robin.
+// Daftar di-cache singkat; bila fetch gagal, cache basi dipakai supaya
+// request tetap jalan selama 9Router sempat merespons sebelumnya.
+func (h *ChatHandler) pickModel(ctx context.Context) (string, error) {
+	h.modelsMu.Lock()
+	fresh := len(h.cachedModels) > 0 && time.Since(h.modelsFetchedAt) < nineRouterModelsTTL
+	cached := h.cachedModels
+	h.modelsMu.Unlock()
+
+	list := cached
+	if !fresh {
+		fetched, err := h.fetchModels(ctx)
+		if err != nil {
+			if len(cached) == 0 {
+				return "", err
+			}
+			log.Printf("[chat] models refresh failed, using %d stale models: %v", len(cached), err)
+			list = cached
+		} else {
+			h.modelsMu.Lock()
+			h.cachedModels = fetched
+			h.modelsFetchedAt = time.Now()
+			h.modelsMu.Unlock()
+			list = fetched
+		}
+	}
+	if len(list) == 0 {
+		return "", fmt.Errorf("no models available from 9Router")
+	}
+	n := h.rrCounter.Add(1)
+	return list[int(n-1)%len(list)], nil
 }
 
 type chatIncomingMessage struct {
@@ -94,9 +188,8 @@ type chatCompletionRequest struct {
 }
 
 // toChatCompletionBody maps validated messages onto the OpenAI-compatible
-// shape served by 9Router (/v1/chat/completions) and by Gemini's own
-// OpenAI endpoint. Roles pass through (system/user/assistant). Pure
-// (unit-tested).
+// shape served by 9Router (/v1/chat/completions). Roles pass through
+// (system/user/assistant). Pure (unit-tested).
 func toChatCompletionBody(model string, msgs []chatIncomingMessage) chatCompletionRequest {
 	out := make([]chatCompletionMessage, 0, len(msgs))
 	for _, m := range msgs {
@@ -132,17 +225,6 @@ func replyTextOf(v any) string {
 	return strings.TrimSpace(s)
 }
 
-// secondsUntilMidnight returns seconds from now to next Jakarta midnight.
-// Pure-ish (takes time, unit-tested) — drives the 429 retry_after_seconds.
-func secondsUntilMidnight(now time.Time) int {
-	next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, jakartaLoc)
-	secs := int(next.Sub(now).Seconds())
-	if secs < 1 {
-		return 1
-	}
-	return secs
-}
-
 func (h *ChatHandler) checkAppSecret(c *gin.Context) bool {
 	want := strings.TrimSpace(h.Cfg.ChatAppSecret)
 	if want == "" {
@@ -156,9 +238,9 @@ func (h *ChatHandler) checkAppSecret(c *gin.Context) bool {
 	return true
 }
 
-// callProvider sends one chat completion through the configured OpenAI-
-// compatible endpoint (9Router /v1/chat/completions or Gemini's own OpenAI
-// endpoint). apiKey travels only in the Authorization header, never in logs.
+// callProvider sends one chat completion through 9Router
+// (/v1/chat/completions, OpenAI-compatible). apiKey travels only in the
+// Authorization header, never in logs.
 func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model string, body chatCompletionRequest) (text string, tIn, tOut int, servedModel string, err error) {
 	url := baseURL + "/chat/completions"
 	payload, err := json.Marshal(body)
@@ -229,11 +311,26 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 	return "", 0, 0, "", lastErr
 }
 
-// PostChat relays one chat message through the server-held provider key.
-// Quota: CHAT_DAILY_LIMIT successes+failures per (device_id, apps_name, day).
+// PostChat relays one chat message via 9Router using the server-held key.
+// Limit harian diatur di mobile apps, bukan backend: setiap request valid
+// langsung diteruskan (tetap dicatat di DB untuk monitoring/statistik).
+// Model dipilih otomatis round-robin dari daftar /v1/models 9Router per
+// request (requested); model aktual yang menjawab (served, dari respons
+// upstream — bisa beda bila failover di dalam 9Router) dicatat di kolom
+// provider DB dan dikembalikan sebagai "model", sedangkan yang diminta
+// dikembalikan sebagai "requested_model" agar transparan.
 func (h *ChatHandler) PostChat(c *gin.Context) {
-	if h.Cfg.ProviderAPIKey() == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat relay disabled"})
+	if !h.Cfg.ChatRelayReady() {
+		log.Printf("[chat] relay disabled: CHAT_PROVIDER_API_KEY empty")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat relay disabled (9Router not configured)"})
+		return
+	}
+	baseURL := h.Cfg.ProviderBaseURL()
+	if isDirectGeminiURL(baseURL) {
+		// Pertahanan berlapis: backend tidak boleh menembak langsung ke
+		// Gemini — semua chat wajib lewat 9Router.
+		log.Printf("[chat] misconfigured base_url=%s: direct Gemini blocked, use 9Router", baseURL)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat relay misconfigured (direct Gemini blocked, use 9Router)"})
 		return
 	}
 	if !h.checkAppSecret(c) {
@@ -255,37 +352,30 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if len(idolName) > 100 {
 		idolName = idolName[:100]
 	}
-	now := jakartaNow()
-	today := now.Format("2006-01-02")
-
-	var used int64
-	if err := h.DB.Model(&models.ChatMessage{}).
-		Where("device_id = ? AND apps_name = ? AND usage_date = ?", deviceID, appsName, today).
-		Count(&used).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "quota check failed"})
-		return
-	}
-	if int(used) >= h.Cfg.ChatDailyLimit {
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error":               "daily quota exceeded",
-			"retry_after_seconds": secondsUntilMidnight(now),
-		})
-		return
-	}
+	today := jakartaNow().Format("2006-01-02")
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(h.Cfg.ChatTimeoutSec)*time.Second)
 	defer cancel()
-	model := h.Cfg.ProviderModel()
-	reply, tIn, tOut, served, err := h.callProvider(ctx, h.Cfg.ProviderBaseURL(), h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
+	// Tanpa model tetap: pilih otomatis dari daftar model 9Router.
+	// 502 agar mobile fallback, konsisten dengan kegagalan provider lain.
+	model, err := h.pickModel(ctx)
+	if err != nil {
+		log.Printf("[chat] no models available base_url=%s err=%v", baseURL, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
+		return
+	}
+	started := time.Now()
+	reply, tIn, tOut, served, err := h.callProvider(ctx, baseURL, h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
 	if served == "" {
 		served = model // gagal sebelum respons terbaca — catat yang diminta
 	}
+	providerLabel := "9router:" + served
 
 	row := models.ChatMessage{
 		DeviceID:   deviceID,
 		AppsName:   appsName,
 		IdolName:   idolName,
-		Provider:   "openai-compat:" + served,
+		Provider:   providerLabel,
 		TokensIn:   tIn,
 		TokensOut:  tOut,
 		Ok:         err == nil,
@@ -297,11 +387,20 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if err != nil {
 		// Log status/error saja (tanpa key, tanpa isi pesan user) agar
 		// diagnosis 502 tidak buta seperti sebelumnya.
-		log.Printf("[chat] provider failed model=%s err=%v", served, err)
+		log.Printf("[chat] provider failed base_url=%s requested=%s served=%s err=%v", baseURL, model, served, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"reply": reply, "provider": "openai-compat:" + served, "model": served})
+	log.Printf("[chat] ok base_url=%s requested=%s served=%s tokens_in=%d tokens_out=%d latency_ms=%d",
+		baseURL, model, served, tIn, tOut, time.Since(started).Milliseconds())
+	c.JSON(http.StatusOK, gin.H{"reply": reply, "provider": providerLabel, "model": served, "requested_model": model})
+}
+
+// isDirectGeminiURL true bila base URL menunjuk langsung ke Gemini, bukan
+// ke gateway 9Router. Dipakai sebagai guard agar tidak ada jalur langsung.
+func isDirectGeminiURL(baseURL string) bool {
+	u := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(u, "generativelanguage.googleapis.com")
 }
 
 type chatIdolStat struct {

@@ -77,13 +77,15 @@ func main() {
 
 		chat := api.Group("/chat")
 		{
-			// Anonymous AI-chat relay (quota per device, server-held provider key).
+			// Anonymous AI-chat relay (server-held 9Router key).
 			chat.POST("", chatH.PostChat)
 			chat.GET("/stats/daily", middleware.Auth(cfg), middleware.RequireRole("admin"), chatH.DailyStats)
 		}
 	}
 
 	log.Printf("server starting on :%s", cfg.Port)
+	log.Printf("chat relay: base_url=%s ready=%t (models auto from 9Router /v1/models, via 9Router only)",
+		cfg.ProviderBaseURL(), cfg.ChatRelayReady())
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
