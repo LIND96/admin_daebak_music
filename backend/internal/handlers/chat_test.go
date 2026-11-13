@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,6 +96,60 @@ func TestIsDirectGeminiURL(t *testing.T) {
 	}
 	if isDirectGeminiURL("http://nine-router:20128/v1") {
 		t.Fatal("9Router must not be blocked")
+	}
+}
+
+func TestChatWithFailoverTriesNextModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"bad-model"},{"id":"good-model"}]}`))
+		case "/chat/completions":
+			var body struct {
+				Model string `json:"model"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Model == "bad-model" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"good-model","choices":[{"message":{"content":"hi"}}]}`))
+		default:
+			t.Errorf("path = %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
+	reply, _, _, requested, served, err := h.chatWithFailover(context.Background(), srv.URL, "k",
+		[]chatIncomingMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if reply != "hi" || requested != "good-model" || served != "good-model" {
+		t.Fatalf("got reply=%q requested=%q served=%q", reply, requested, served)
+	}
+}
+
+func TestChatWithFailoverAllFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/models" {
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"m1"},{"id":"m2"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
+	_, _, _, requested, _, err := h.chatWithFailover(context.Background(), srv.URL, "k",
+		[]chatIncomingMessage{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("all models failing must error")
+	}
+	if requested == "" {
+		t.Fatal("requested must record last tried model")
 	}
 }
 

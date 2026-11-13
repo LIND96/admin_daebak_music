@@ -26,8 +26,9 @@ import (
 // /v1/chat/completions) — tidak ada jalur langsung ke Gemini. Limit harian
 // diatur di mobile apps, bukan backend. Backend TIDAK mem-pin satu model:
 // daftar model chat diambil otomatis dari 9Router (GET /v1/models, di-cache
-// singkat) lalu dipilih round-robin per request, sehingga seluruh
-// model/provider yang tersedia di 9Router ikut terpakai. Contract:
+// singkat) lalu dipilih round-robin per request dengan failover ke model
+// berikut bila gagal, sehingga seluruh model/provider yang tersedia di
+// 9Router ikut terpakai. Contract:
 // success -> {"reply","provider","model","requested_model"},
 // provider failure -> 502.
 
@@ -93,37 +94,87 @@ func (h *ChatHandler) fetchModels(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// pickModel memilih satu model dari daftar 9Router secara round-robin.
-// Daftar di-cache singkat; bila fetch gagal, cache basi dipakai supaya
-// request tetap jalan selama 9Router sempat merespons sebelumnya.
-func (h *ChatHandler) pickModel(ctx context.Context) (string, error) {
+// modelsSnapshot mengembalikan daftar model 9Router (cache singkat,
+// fallback ke cache basi bila fetch gagal). Dipakai pickModel dan failover.
+func (h *ChatHandler) modelsSnapshot(ctx context.Context) ([]string, error) {
 	h.modelsMu.Lock()
 	fresh := len(h.cachedModels) > 0 && time.Since(h.modelsFetchedAt) < nineRouterModelsTTL
 	cached := h.cachedModels
 	h.modelsMu.Unlock()
 
-	list := cached
-	if !fresh {
-		fetched, err := h.fetchModels(ctx)
-		if err != nil {
-			if len(cached) == 0 {
-				return "", err
-			}
-			log.Printf("[chat] models refresh failed, using %d stale models: %v", len(cached), err)
-			list = cached
-		} else {
-			h.modelsMu.Lock()
-			h.cachedModels = fetched
-			h.modelsFetchedAt = time.Now()
-			h.modelsMu.Unlock()
-			list = fetched
+	if fresh {
+		return cached, nil
+	}
+	fetched, err := h.fetchModels(ctx)
+	if err != nil {
+		if len(cached) == 0 {
+			return nil, err
 		}
+		log.Printf("[chat] models refresh failed, using %d stale models: %v", len(cached), err)
+		return cached, nil
+	}
+	h.modelsMu.Lock()
+	h.cachedModels = fetched
+	h.modelsFetchedAt = time.Now()
+	h.modelsMu.Unlock()
+	return fetched, nil
+}
+
+// pickModel memilih satu model dari daftar 9Router secara round-robin.
+// Daftar di-cache singkat; bila fetch gagal, cache basi dipakai supaya
+// request tetap jalan selama 9Router sempat merespons sebelumnya.
+func (h *ChatHandler) pickModel(ctx context.Context) (string, error) {
+	list, err := h.modelsSnapshot(ctx)
+	if err != nil {
+		return "", err
 	}
 	if len(list) == 0 {
 		return "", fmt.Errorf("no models available from 9Router")
 	}
 	n := h.rrCounter.Add(1)
 	return list[int(n-1)%len(list)], nil
+}
+
+// maxChatModelAttempts: berapa model berbeda dicoba per request sebelum
+// menyerah (502). Satu model rusak tidak menggagalkan request selama ada
+// model sehat lain di 9Router.
+const maxChatModelAttempts = 3
+
+// chatWithFailover mengirim chat via 9Router, mulai dari model hasil
+// round-robin lalu lanjut ke model berikut bila gagal (400/429/5xx/
+// network). Mengembalikan requested = model yang akhirnya dipakai (atau
+// terakhir dicoba) dan served = model aktual dari respons upstream.
+func (h *ChatHandler) chatWithFailover(ctx context.Context, baseURL, apiKey string, msgs []chatIncomingMessage) (reply string, tIn, tOut int, requested, served string, err error) {
+	list, err := h.modelsSnapshot(ctx)
+	if err != nil {
+		return "", 0, 0, "", "", err
+	}
+	if len(list) == 0 {
+		return "", 0, 0, "", "", fmt.Errorf("no models available from 9Router")
+	}
+	start := int(h.rrCounter.Add(1)-1) % len(list)
+	attempts := len(list)
+	if attempts > maxChatModelAttempts {
+		attempts = maxChatModelAttempts
+	}
+	tried := map[string]bool{}
+	for i := 0; i < len(list) && len(tried) < attempts; i++ {
+		m := list[(start+i)%len(list)]
+		if tried[m] {
+			continue
+		}
+		tried[m] = true
+		requested = m
+		var e error
+		reply, tIn, tOut, served, e = h.callProvider(ctx, baseURL, apiKey, m, toChatCompletionBody(m, msgs))
+		if e == nil {
+			return reply, tIn, tOut, requested, served, nil
+		}
+		err = e
+		served = m // gagal sebelum respons terbaca — catat yang diminta
+		log.Printf("[chat] model attempt failed requested=%s err=%v, trying next", m, e)
+	}
+	return "", 0, 0, requested, served, err
 }
 
 type chatIncomingMessage struct {
@@ -315,10 +366,10 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 // Limit harian diatur di mobile apps, bukan backend: setiap request valid
 // langsung diteruskan (tetap dicatat di DB untuk monitoring/statistik).
 // Model dipilih otomatis round-robin dari daftar /v1/models 9Router per
-// request (requested); model aktual yang menjawab (served, dari respons
-// upstream — bisa beda bila failover di dalam 9Router) dicatat di kolom
-// provider DB dan dikembalikan sebagai "model", sedangkan yang diminta
-// dikembalikan sebagai "requested_model" agar transparan.
+// request, dengan failover ke model berikut (maks 3) bila gagal — satu
+// model rusak tidak menggagalkan request selama ada model sehat lain.
+// requested = model yang akhirnya dipakai; served = model aktual dari
+// respons upstream. Keduanya dicatat di log dan respons agar transparan.
 func (h *ChatHandler) PostChat(c *gin.Context) {
 	if !h.Cfg.ChatRelayReady() {
 		log.Printf("[chat] relay disabled: CHAT_PROVIDER_API_KEY empty")
@@ -356,16 +407,11 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(h.Cfg.ChatTimeoutSec)*time.Second)
 	defer cancel()
-	// Tanpa model tetap: pilih otomatis dari daftar model 9Router.
+	// Tanpa model tetap: pilih otomatis dari daftar model 9Router, dengan
+	// failover ke model berikut bila yang pertama gagal.
 	// 502 agar mobile fallback, konsisten dengan kegagalan provider lain.
-	model, err := h.pickModel(ctx)
-	if err != nil {
-		log.Printf("[chat] no models available base_url=%s err=%v", baseURL, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
-		return
-	}
 	started := time.Now()
-	reply, tIn, tOut, served, err := h.callProvider(ctx, baseURL, h.Cfg.ProviderAPIKey(), model, toChatCompletionBody(model, req.Messages))
+	reply, tIn, tOut, model, served, err := h.chatWithFailover(ctx, baseURL, h.Cfg.ProviderAPIKey(), req.Messages)
 	if served == "" {
 		served = model // gagal sebelum respons terbaca — catat yang diminta
 	}
@@ -387,7 +433,12 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if err != nil {
 		// Log status/error saja (tanpa key, tanpa isi pesan user) agar
 		// diagnosis 502 tidak buta seperti sebelumnya.
-		log.Printf("[chat] provider failed base_url=%s requested=%s served=%s err=%v", baseURL, model, served, err)
+		if model == "" {
+			// Daftar model pun tak didapat (9Router down/key salah/kosong).
+			log.Printf("[chat] no models available base_url=%s err=%v", baseURL, err)
+		} else {
+			log.Printf("[chat] provider failed base_url=%s requested=%s served=%s err=%v", baseURL, model, served, err)
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": "provider unavailable"})
 		return
 	}
