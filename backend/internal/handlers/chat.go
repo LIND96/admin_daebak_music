@@ -332,7 +332,13 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 		}
 		var out chatCompletionResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return "", 0, 0, "", err
+			// Sertakan cuplikan body (200 char) agar respons non-JSON
+			// upstream (mis. SSE/halaman error) bisa didiagnosis dari log.
+			snip := strings.TrimSpace(string(raw))
+			if len(snip) > 200 {
+				snip = snip[:200]
+			}
+			return "", 0, 0, "", fmt.Errorf("decode provider reply: %v (body %.200q)", err, snip)
 		}
 		if out.Error != nil {
 			return "", 0, 0, "", fmt.Errorf("provider error: %s", out.Error.Message)
