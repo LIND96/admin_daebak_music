@@ -27,8 +27,9 @@ import (
 // diatur di mobile apps, bukan backend. Backend TIDAK mem-pin satu model:
 // daftar model chat diambil otomatis dari 9Router (GET /v1/models, di-cache
 // singkat) lalu dipilih round-robin per request dengan failover ke model
-// berikut bila gagal, sehingga seluruh model/provider yang tersedia di
-// 9Router ikut terpakai. Contract:
+// berikut bila gagal; model yang gagal di-skip sementara (cooldown) sehingga
+// pool self-healing mengikuti seluruh model/provider yang tersedia di
+// 9Router. Contract:
 // success -> {"reply","provider","model","requested_model"},
 // provider failure -> 502.
 
@@ -36,11 +37,13 @@ type ChatHandler struct {
 	DB  *gorm.DB
 	Cfg *config.Config
 
-	// Cache daftar model 9Router + counter round-robin. Diakses dari
-	// banyak goroutine (satu per request) sehingga butuh mutex/atomic.
+	// Cache daftar model 9Router + counter round-robin + cooldown model
+	// gagal. Diakses dari banyak goroutine (satu per request) sehingga
+	// butuh mutex/atomic.
 	modelsMu        sync.Mutex
 	cachedModels    []string
 	modelsFetchedAt time.Time
+	failedModels    map[string]time.Time
 	rrCounter       atomic.Uint64
 }
 
@@ -140,6 +143,50 @@ func (h *ChatHandler) pickModel(ctx context.Context) (string, error) {
 // model sehat lain di 9Router.
 const maxChatModelAttempts = 3
 
+// failedModelCooldown: berapa lama model yang gagal di-skip dari undian
+// sebelum boleh dicoba lagi. Membuat pool self-healing: dengan ratusan
+// model di 9Router, yang rusak otomatis tersisih sementara tanpa harus
+// di-disable manual satu per satu; yang pulih kembali ikut terpakai
+// setelah cooldown lewat (atau lebih cepat bila cache daftar di-refresh).
+const failedModelCooldown = 10 * time.Minute
+
+// markModelFailed mencatat model gagal agar di-skip sementara.
+// clearModelFailed menghapus catatan itu saat model sukses.
+func (h *ChatHandler) markModelFailed(m string) {
+	h.modelsMu.Lock()
+	defer h.modelsMu.Unlock()
+	if h.failedModels == nil {
+		h.failedModels = map[string]time.Time{}
+	}
+	h.failedModels[m] = time.Now()
+}
+
+func (h *ChatHandler) clearModelFailed(m string) {
+	h.modelsMu.Lock()
+	defer h.modelsMu.Unlock()
+	delete(h.failedModels, m)
+}
+
+// eligibleModels mengembalikan daftar model yang boleh diundi: yang tidak
+// sedang cooldown. Bila semuanya cooldown (mis. baru restart total),
+// kembalikan daftar penuh agar tetap ada yang dicoba daripada langsung 502.
+func (h *ChatHandler) eligibleModels(list []string) []string {
+	h.modelsMu.Lock()
+	defer h.modelsMu.Unlock()
+	now := time.Now()
+	eligible := make([]string, 0, len(list))
+	for _, m := range list {
+		if ts, bad := h.failedModels[m]; bad && now.Sub(ts) < failedModelCooldown {
+			continue
+		}
+		eligible = append(eligible, m)
+	}
+	if len(eligible) == 0 {
+		return list
+	}
+	return eligible
+}
+
 // chatWithFailover mengirim chat via 9Router, mulai dari model hasil
 // round-robin lalu lanjut ke model berikut bila gagal (400/429/5xx/
 // network). Mengembalikan requested = model yang akhirnya dipakai (atau
@@ -152,14 +199,18 @@ func (h *ChatHandler) chatWithFailover(ctx context.Context, baseURL, apiKey stri
 	if len(list) == 0 {
 		return "", 0, 0, "", "", fmt.Errorf("no models available from 9Router")
 	}
-	start := int(h.rrCounter.Add(1)-1) % len(list)
-	attempts := len(list)
+	pool := h.eligibleModels(list)
+	if len(pool) != len(list) {
+		log.Printf("[chat] pool %d/%d models eligible (%d in cooldown)", len(pool), len(list), len(list)-len(pool))
+	}
+	start := int(h.rrCounter.Add(1)-1) % len(pool)
+	attempts := len(pool)
 	if attempts > maxChatModelAttempts {
 		attempts = maxChatModelAttempts
 	}
 	tried := map[string]bool{}
-	for i := 0; i < len(list) && len(tried) < attempts; i++ {
-		m := list[(start+i)%len(list)]
+	for i := 0; i < len(pool) && len(tried) < attempts; i++ {
+		m := pool[(start+i)%len(pool)]
 		if tried[m] {
 			continue
 		}
@@ -168,10 +219,12 @@ func (h *ChatHandler) chatWithFailover(ctx context.Context, baseURL, apiKey stri
 		var e error
 		reply, tIn, tOut, served, e = h.callProvider(ctx, baseURL, apiKey, m, toChatCompletionBody(m, msgs))
 		if e == nil {
+			h.clearModelFailed(m)
 			return reply, tIn, tOut, requested, served, nil
 		}
 		err = e
 		served = m // gagal sebelum respons terbaca — catat yang diminta
+		h.markModelFailed(m)
 		log.Printf("[chat] model attempt failed requested=%s err=%v, trying next", m, e)
 	}
 	return "", 0, 0, requested, served, err

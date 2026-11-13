@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -205,5 +206,46 @@ func TestPickModelEmptyList(t *testing.T) {
 	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
 	if _, err := h.pickModel(context.Background()); err == nil {
 		t.Fatal("empty model list must error")
+	}
+}
+
+func TestChatWithFailoverSkipsCooldownModel(t *testing.T) {
+	var mu sync.Mutex
+	hits := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/models" {
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"bad-model"},{"id":"good-model"}]}`))
+			return
+		}
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		hits[body.Model]++
+		mu.Unlock()
+		if body.Model == "bad-model" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"good-model","choices":[{"message":{"content":"hi"}}]}`))
+	}))
+	defer srv.Close()
+	h := &ChatHandler{Cfg: &config.Config{ChatProviderBaseURL: srv.URL, ChatProviderAPIKey: "k"}}
+	msgs := []chatIncomingMessage{{Role: "user", Content: "hi"}}
+	if _, _, _, _, _, err := h.chatWithFailover(context.Background(), srv.URL, "k", msgs); err != nil {
+		t.Fatalf("first err = %v", err)
+	}
+	// Request kedua: bad-model sedang cooldown -> tidak boleh dicoba lagi.
+	if _, _, _, requested, _, err := h.chatWithFailover(context.Background(), srv.URL, "k", msgs); err != nil {
+		t.Fatalf("second err = %v", err)
+	} else if requested != "good-model" {
+		t.Fatalf("requested = %q, want good-model (bad in cooldown)", requested)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits["bad-model"] != 1 {
+		t.Fatalf("bad-model hits = %d, want 1 (skipped while in cooldown)", hits["bad-model"])
 	}
 }
