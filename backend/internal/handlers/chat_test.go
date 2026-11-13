@@ -133,6 +133,19 @@ func TestChatWithFailoverTriesNextModel(t *testing.T) {
 	}
 }
 
+func TestDecodeErrorContextOffset(t *testing.T) {
+	raw := []byte(`{"ok":true}data: broken-tail`)
+	var v map[string]any
+	err := json.Unmarshal(raw, &v)
+	if err == nil {
+		t.Fatal("expected syntax error")
+	}
+	ctx := decodeErrorContext(raw, err)
+	if !strings.Contains(ctx, "offset 12") || !strings.Contains(ctx, "data: broken-tail") {
+		t.Fatalf("ctx = %q", ctx)
+	}
+}
+
 func TestChatWithFailoverAllFail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

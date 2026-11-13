@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -329,6 +330,30 @@ func replyTextOf(v any) string {
 	return strings.TrimSpace(s)
 }
 
+// decodeErrorContext menunjukkan potongan body di sekitar offset gagal
+// parse (untuk *json.SyntaxError) beserta panjang body, atau 200 char
+// pertama bila tipe error lain.
+func decodeErrorContext(raw []byte, err error) string {
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		off := int(se.Offset)
+		start := off - 120
+		if start < 0 {
+			start = 0
+		}
+		end := off + 120
+		if end > len(raw) {
+			end = len(raw)
+		}
+		return fmt.Sprintf("offset %d context %.260q (len=%d)", off, string(raw[start:end]), len(raw))
+	}
+	snip := strings.TrimSpace(string(raw))
+	if len(snip) > 200 {
+		snip = snip[:200]
+	}
+	return fmt.Sprintf("body %.200q", snip)
+}
+
 func (h *ChatHandler) checkAppSecret(c *gin.Context) bool {
 	want := strings.TrimSpace(h.Cfg.ChatAppSecret)
 	if want == "" {
@@ -385,13 +410,10 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 		}
 		var out chatCompletionResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
-			// Sertakan cuplikan body (200 char) agar respons non-JSON
-			// upstream (mis. SSE/halaman error) bisa didiagnosis dari log.
-			snip := strings.TrimSpace(string(raw))
-			if len(snip) > 200 {
-				snip = snip[:200]
-			}
-			return "", 0, 0, "", fmt.Errorf("decode provider reply: %v (body %.200q)", err, snip)
+			// Sertakan konteks sekitar offset error agar respons non-JSON
+			// upstream (mis. SSE/halaman error tersambung JSON) bisa
+			// didiagnosis dari log.
+			return "", 0, 0, "", fmt.Errorf("decode provider reply: %v (%s)", err, decodeErrorContext(raw, err))
 		}
 		if out.Error != nil {
 			return "", 0, 0, "", fmt.Errorf("provider error: %s", out.Error.Message)
