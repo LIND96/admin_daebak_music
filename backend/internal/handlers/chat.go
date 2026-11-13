@@ -145,11 +145,12 @@ func (h *ChatHandler) pickModel(ctx context.Context) (string, error) {
 const maxChatModelAttempts = 3
 
 // failedModelCooldown: berapa lama model yang gagal di-skip dari undian
-// sebelum boleh dicoba lagi. Membuat pool self-healing: dengan ratusan
-// model di 9Router, yang rusak otomatis tersisih sementara tanpa harus
-// di-disable manual satu per satu; yang pulih kembali ikut terpakai
-// setelah cooldown lewat (atau lebih cepat bila cache daftar di-refresh).
-const failedModelCooldown = 10 * time.Minute
+// sebelum boleh dicoba lagi. 24 jam mengikuti pola reset kuota harian
+// upstream gratis; model rusak tersisih lama tanpa harus di-disable manual,
+// yang pulih ikut terpakai lagi setelah cooldown lewat (atau saat cache
+// daftar di-refresh). Catatan: cooldown tersimpan di memori — restart
+// backend me-resetnya.
+const failedModelCooldown = 24 * time.Hour
 
 // markModelFailed mencatat model gagal agar di-skip sementara.
 // clearModelFailed menghapus catatan itu saat model sukses.
