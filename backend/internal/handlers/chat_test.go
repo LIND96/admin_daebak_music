@@ -146,6 +146,31 @@ func TestDecodeErrorContextOffset(t *testing.T) {
 	}
 }
 
+func TestDecodeChatResponseIgnoresTrailingSSE(t *testing.T) {
+	// Bentuk persis dari 9Router: JSON lengkap + frame SSE di ekor.
+	raw := []byte("{\"model\":\"m\",\"choices\":[{\"message\":{\"content\":\"hi\"}}]," +
+		"\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}data: [DONE]\n\n")
+	out, err := decodeChatResponse(raw)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(out.Choices) != 1 || replyTextOf(out.Choices[0].Message.Content) != "hi" {
+		t.Fatalf("out = %+v", out)
+	}
+	if out.Usage == nil || out.Usage.PromptTokens != 1 || out.Usage.CompletionTokens != 2 {
+		t.Fatalf("usage = %+v", out.Usage)
+	}
+}
+
+func TestDecodeChatResponseRejectsGarbage(t *testing.T) {
+	if _, err := decodeChatResponse([]byte("data: broken-tail")); err == nil {
+		t.Fatal("non-JSON must error")
+	}
+	if _, err := decodeChatResponse([]byte(`{"model":`)); err == nil {
+		t.Fatal("truncated JSON must error")
+	}
+}
+
 func TestChatWithFailoverAllFail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

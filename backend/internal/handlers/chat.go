@@ -331,6 +331,20 @@ func replyTextOf(v any) string {
 	return strings.TrimSpace(s)
 }
 
+// decodeChatResponse mem-parse satu respons chat completion. 9Router
+// kadang menempelkan frame SSE (mis. "data: [DONE]") setelah objek JSON
+// lengkap — json.Unmarshal yang ketat menolaknya walau jawabannya valid.
+// Decoder streaming membaca nilai JSON pertama saja dan mengabaikan ekor,
+// sehingga respons sukses semacam itu tetap dipakai.
+func decodeChatResponse(raw []byte) (chatCompletionResponse, error) {
+	var out chatCompletionResponse
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 // decodeErrorContext menunjukkan potongan body di sekitar offset gagal
 // parse (untuk *json.SyntaxError) beserta panjang body, atau 200 char
 // pertama bila tipe error lain.
@@ -410,7 +424,7 @@ func (h *ChatHandler) callProvider(ctx context.Context, baseURL, apiKey, model s
 			return "", 0, 0, "", fmt.Errorf("provider status %d", resp.StatusCode)
 		}
 		var out chatCompletionResponse
-		if err := json.Unmarshal(raw, &out); err != nil {
+		if out, err = decodeChatResponse(raw); err != nil {
 			// Sertakan konteks sekitar offset error agar respons non-JSON
 			// upstream (mis. SSE/halaman error tersambung JSON) bisa
 			// didiagnosis dari log.
