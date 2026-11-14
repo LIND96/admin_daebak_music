@@ -137,6 +137,8 @@ export type ChatProviderStat = {
   provider: string;
   hits: number;
   unique_devices: number;
+  ok_count: number;
+  failed_count: number;
 };
 
 export type ChatStatsResponse = {

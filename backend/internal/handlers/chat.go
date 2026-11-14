@@ -647,10 +647,14 @@ func (h *ChatHandler) DailyStats(c *gin.Context) {
 		Provider      string `json:"provider"`
 		Hits          int    `json:"hits"`
 		UniqueDevices int    `json:"unique_devices"`
+		OkCount       int    `json:"ok_count"`
+		FailedCount   int    `json:"failed_count"`
 	}
 	var byProvider []providerStat
 	providerSQL := `SELECT COALESCE(NULLIF(provider, ''), '(unknown)') AS provider, COUNT(*) AS hits,
-		COUNT(DISTINCT device_id) AS unique_devices ` + base + `
+		COUNT(DISTINCT device_id) AS unique_devices,
+		COUNT(*) FILTER (WHERE ok) AS ok_count,
+		COUNT(*) FILTER (WHERE NOT ok) AS failed_count ` + base + `
 		GROUP BY 1 ORDER BY hits DESC`
 	if err := h.DB.Raw(providerSQL, args...).Scan(&byProvider).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch providers"})
