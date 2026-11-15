@@ -10,7 +10,10 @@ Status dapat berubah (kuota, model retired, auth) — backend dirancang tahan te
 - Daftar model diambil otomatis dari 9Router (`GET /v1/models`, cache 5 menit).
 - Tiap request diundi round-robin, gagal → coba model berikut (maks 3, `maxChatModelAttempts`).
 - Model gagal masuk cooldown 24 jam (`failedModelCooldown`) lalu dicoba lagi otomatis.
-- Respons: `{"reply","provider":"9router:<served>","model":<served>,"requested_model":<undi>}`.
+- Respons: `{"reply","provider":"9router:<requested>","model":<served>,"requested_model":<undi>}`.
+  Kolom `provider` di DB memakai model yang diminta (full id) agar baris
+  sukses/gagal mengelompok per model; model aktual yang menjawab ada di
+  field `model`.
   `model` = yang benar-benar menjawab (bisa beda karena failover di 9Router).
 - Dasbor "Provider terpopuler" grouping generik atas kolom `provider` — jalan otomatis.
 

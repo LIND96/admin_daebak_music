@@ -511,7 +511,14 @@ func (h *ChatHandler) PostChat(c *gin.Context) {
 	if served == "" {
 		served = model // gagal sebelum respons terbaca — catat yang diminta
 	}
-	providerLabel := "9router:" + served
+	// Label memakai model yang DIMINTA (full id persis dari /v1/models,
+	// mis. ocg/beam-free), bukan model yang menjawab. Alasannya: 9Router
+	// mengupas prefix provider di field "model" respons sukses, sehingga
+	// label served membuat sukses/gagal tercatat beda baris (miss).
+	// Dengan label requested, tiap baris = satu model, dan kolom
+	// ok/failed dasbor jujur per model. Model aktual tetap ada di
+	// respons JSON ("model") dan log untuk transparansi failover.
+	providerLabel := "9router:" + model
 
 	row := models.ChatMessage{
 		DeviceID:   deviceID,
